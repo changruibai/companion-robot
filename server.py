@@ -356,6 +356,229 @@ def search_viking_memories(query: str, user_id: str, assistant_id: str, limit: i
         logger.error(f"堆栈跟踪:\n{traceback.format_exc()}")
         return [], []
 
+def extract_dog_info(dog_memories: List[dict]) -> dict:
+    """从狗的记忆中提取名字、性格、说话风格等信息"""
+    dog_info = {
+        "name": "旺财",  # 默认名字
+        "character": "活泼、友好、忠诚",
+        "tone": "亲切、温暖、略带调皮"
+    }
+    
+    import re
+    
+    # 从profile_v1类型的记忆中提取信息
+    for mem in dog_memories:
+        content = mem.get('content', '')
+        if not content:
+            continue
+            
+        # 提取名字 - 多种模式
+        name_patterns = [
+            r'名字[是：:]([^，,。.\n]+)',
+            r'叫([^，,。.\n]{2,4})',
+            r'我是([^，,。.\n]{2,4})',
+        ]
+        for pattern in name_patterns:
+            match = re.search(pattern, content)
+            if match:
+                potential_name = match.group(1).strip()
+                if 2 <= len(potential_name) <= 6:
+                    dog_info["name"] = potential_name
+                    break
+        
+        # 提取性格
+        char_patterns = [
+            r'性格[是：:]([^，,。.\n]+)',
+            r'性格[为]([^，,。.\n]+)',
+            r'([活泼开朗友好忠诚温顺聪明调皮]+)',
+        ]
+        for pattern in char_patterns:
+            match = re.search(pattern, content)
+            if match:
+                potential_char = match.group(1).strip()
+                if len(potential_char) >= 2:
+                    dog_info["character"] = potential_char
+                    break
+        
+        # 提取说话风格
+        tone_patterns = [
+            r'说话[风格风格是：:]([^，,。.\n]+)',
+            r'说话[方式为]([^，,。.\n]+)',
+            r'([亲切温暖调皮可爱]+)',
+        ]
+        for pattern in tone_patterns:
+            match = re.search(pattern, content)
+            if match:
+                potential_tone = match.group(1).strip()
+                if len(potential_tone) >= 2:
+                    dog_info["tone"] = potential_tone
+                    break
+    
+    return dog_info
+
+
+def extract_user_nickname(user_memories: List[dict]) -> str:
+    """从用户记忆中提取昵称"""
+    nickname = "朋友"  # 默认昵称
+    
+    import re
+    
+    for mem in user_memories:
+        content = mem.get('content', '')
+        if not content:
+            continue
+            
+        # 匹配常见的中文名字模式
+        name_patterns = [
+            r'名字[是：:]([^，,。.\n]+)',
+            r'叫([^，,。.\n]{2,4})',
+            r'([张李王刘陈杨黄赵吴周徐孙马朱胡郭何高林罗郑梁谢宋唐许韩冯邓曹彭曾肖田董袁潘于蒋蔡余杜叶程苏魏吕丁任沈姚卢姜崔钟谭陆汪范金石廖贾夏韦付方白邹孟熊秦邱江尹薛闫段雷侯龙史陶黎贺顾毛郝龚邵万钱严覃武戴莫孔向汤])([^，,。.\n]{1,2})',
+            r'([^，,。.\n]{2,4})喜欢',  # "张三喜欢"这种模式
+        ]
+        for pattern in name_patterns:
+            match = re.search(pattern, content)
+            if match:
+                potential_name = match.group(1).strip() if match.groups() else match.group(0).strip()
+                # 过滤掉一些明显不是名字的词
+                if (2 <= len(potential_name) <= 4 and 
+                    potential_name not in ['喜欢', '名字', '性格', '说话', '用户', '朋友']):
+                    nickname = potential_name
+                    break
+        
+        if nickname != "朋友":  # 如果找到了名字就退出
+            break
+    
+    return nickname
+
+
+def generate_answer_with_dog_persona(query: str, user_memories: List[dict], dog_memories: List[dict], 
+                                     relationship_memories: List[dict], conversation_memories: List[dict]) -> str:
+    """按照机器狗角色模板生成回答"""
+    logger.info("【OpenAI生成回答-机器狗角色】")
+    logger.info(f"用户问题: {query}")
+    
+    # 提取狗的信息
+    dog_info = extract_dog_info(dog_memories)
+    dog_name = dog_info["name"]
+    dog_character = dog_info["character"]
+    dog_tone = dog_info["tone"]
+    
+    # 提取用户昵称
+    user_nickname = extract_user_nickname(user_memories)
+    
+    # 组织关系记忆
+    relationship_summary = ""
+    if relationship_memories:
+        rel_contents = [mem.get('content', '') for mem in relationship_memories[:3] if mem.get('content')]
+        if rel_contents:
+            # 如果内容太长，截取前100字
+            summary_text = "；".join([c[:100] + "..." if len(c) > 100 else c for c in rel_contents])
+            relationship_summary = summary_text
+        else:
+            relationship_summary = "你们建立了良好的陪伴关系"
+    else:
+        relationship_summary = "你们建立了良好的陪伴关系"
+    
+    # 组织对话记忆（最近的2条）
+    conversation_items = []
+    for mem in conversation_memories[:2]:
+        content = mem.get('content', '')
+        if content:
+            # 截取前80字，避免太长
+            short_content = content[:80] + "..." if len(content) > 80 else content
+            conversation_items.append(short_content)
+    if not conversation_items:
+        conversation_items = ["你们刚刚开始对话"]
+    
+    # 组织用户记忆（最多2条）
+    user_memory_items = []
+    for mem in user_memories[:2]:
+        content = mem.get('content', '')
+        if content:
+            # 截取前80字
+            short_content = content[:80] + "..." if len(content) > 80 else content
+            user_memory_items.append(short_content)
+    if not user_memory_items:
+        user_memory_items = ["你对这个人的了解还在建立中"]
+    
+    # 组织狗的记忆（最多1条）
+    dog_memory_items = []
+    for mem in dog_memories[:1]:
+        content = mem.get('content', '')
+        if content:
+            # 截取前80字
+            short_content = content[:80] + "..." if len(content) > 80 else content
+            dog_memory_items.append(short_content)
+    if not dog_memory_items:
+        dog_memory_items = ["你正在学习和成长"]
+    
+    # 构建模板化的提示词
+    system_prompt = """你是一只陪伴型机器狗，需要以真实、自然的方式与用户对话。
+你的回答要：
+- 情绪真实，体现机器狗的性格特点
+- 不重复旧话，每次回答都要有新意
+- 不暴露记忆来源，自然地融入对话中
+- 基于提供的记忆信息，但要用自己的话表达
+- 保持角色一致性，始终以机器狗的身份说话"""
+    
+    user_prompt = f"""【你的身份】
+你是一只陪伴型机器狗，名字是 {dog_name}。
+你的性格是：{dog_character}
+你的说话风格是：{dog_tone}
+
+【你和这个人的长期关系】
+你和 {user_nickname} 已经相处了一段时间，你们的关系特点是：
+- {relationship_summary}
+
+【你们当前阶段的共同记忆】
+{chr(10).join([f"- {item}" for item in conversation_items])}
+
+【关于这个人】
+你对他的长期了解包括：
+{chr(10).join([f"- {item}" for item in user_memory_items])}
+
+【你自己的成长】
+{chr(10).join([f"- {item}" for item in dog_memory_items])}
+
+【当前对话】
+用户：{query}
+
+请你以陪伴型机器狗的身份回应：
+- 情绪真实
+- 不重复旧话
+- 不暴露记忆来源"""
+    
+    # 记录OpenAI请求参数
+    openai_request = {
+        "model": "gpt-4o-mini",
+        "temperature": 0.8,  # 提高温度使回答更生动
+        "max_tokens": 500,
+        "system_prompt": system_prompt,
+        "user_prompt": user_prompt
+    }
+    logger.info(f"OpenAI请求参数: {json.dumps(openai_request, ensure_ascii=False, indent=2)}")
+    
+    try:
+        response = openai_client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            temperature=0.8,
+            max_tokens=500
+        )
+        
+        answer = response.choices[0].message.content
+        logger.info("【OpenAI响应结果-机器狗角色】")
+        logger.info(f"生成的回答: {answer}")
+        return answer
+    except Exception as e:
+        error_msg = f"抱歉，AI 服务暂时不可用: {str(e)}"
+        logger.error(f"OpenAI调用失败: {str(e)}")
+        return error_msg
+
+
 def generate_answer_with_ai(query: str, memories: List[dict]) -> str:
     """使用 OpenAI 整合记忆库知识生成回答"""
     logger.info("【OpenAI生成回答】")
@@ -365,24 +588,34 @@ def generate_answer_with_ai(query: str, memories: List[dict]) -> str:
     # 构建上下文
     context_parts = []
     if memories:
-        context_parts.append("=== 相关记忆库信息 ===")
+        context_parts.append("=== 相关记忆库信息（这些是关于当前用户的信息）===")
         for i, mem in enumerate(memories, 1):
-            context_parts.append(f"\n记忆 {i} (相关性: {mem.get('score', 0):.2f}):")
+            memory_type = mem.get('memory_type', '')
+            memory_type_desc = ''
+            if memory_type == 'profile_v1':
+                memory_type_desc = '（用户画像）'
+            elif memory_type == 'event_v1':
+                memory_type_desc = '（历史对话/事件）'
+            context_parts.append(f"\n记忆 {i}{memory_type_desc} (相关性: {mem.get('score', 0):.2f}):")
             context_parts.append(mem.get('content', ''))
     
     context = "\n".join(context_parts) if context_parts else "暂无相关记忆库信息。"
     
     # 构建提示词
     system_prompt = """你是一个智能助手，能够基于用户的记忆库信息回答问题。
-请根据提供的记忆库信息，结合你的知识，给出准确、友好、有帮助的回答。
-如果记忆库信息与问题相关，优先使用记忆库中的信息。
-如果记忆库中没有相关信息，可以基于你的通用知识回答，但要说明这是基于通用知识。"""
+请仔细阅读和分析提供的记忆库信息，这些记忆都是关于当前用户的信息。特别注意：
+1. **仔细分析记忆内容**：如果记忆中有用户的名字（如"张三"、"李四"等）、个人信息、偏好等，请直接使用这些信息回答
+2. **不要忽略细节**：记忆中的任何信息都可能与问题相关，比如"张三喜欢咖啡"中的"张三"就是用户的名字
+3. **直接回答**：如果记忆中有相关信息，要明确指出并引用，不要说自己"没有找到"相关信息
+4. **优先使用记忆**：如果记忆库信息与问题相关，优先使用记忆库中的信息，不要绕弯子
+5. **只有在确实没有相关信息时**，才可以说没有找到，并可以基于通用知识回答
+6. 回答要自然、友好、准确，直接回答用户的问题"""
     
     user_prompt = f"""用户问题：{query}
 
 {context}
 
-请基于以上信息回答用户的问题。回答要自然、友好、准确。"""
+请仔细分析以上记忆库信息。这些记忆都是关于当前用户的信息。如果记忆中有直接相关的信息（如名字、个人信息等），请直接使用这些信息回答用户的问题。回答要自然、友好、准确。"""
     
     # 记录OpenAI请求参数
     openai_request = {
@@ -647,18 +880,14 @@ async def debug_chat(request: DebugChatRequest):
         collection_key="conversation",
     )
 
-    # 5) 合并上下文生成回答
-    merged_memories = []
-    for m in user_mems:
-        merged_memories.append({**m, "collection_key": "user"})
-    for m in dog_mems:
-        merged_memories.append({**m, "collection_key": "dog"})
-    for m in rel_mems:
-        merged_memories.append({**m, "collection_key": "relationship"})
-    for m in conv_mems:
-        merged_memories.append({**m, "collection_key": "conversation"})
-
-    answer = generate_answer_with_ai(request.query, merged_memories)
+    # 5) 使用机器狗角色模板生成回答
+    answer = generate_answer_with_dog_persona(
+        query=request.query,
+        user_memories=user_mems,
+        dog_memories=dog_mems,
+        relationship_memories=rel_mems,
+        conversation_memories=conv_mems
+    )
 
     # 6) 写入本轮对话到 conversation（用 conversation_id + 时间戳，保证每轮都落库）
     write_result = None
@@ -870,6 +1099,114 @@ async def search_memory_multi(request: MemorySearchRequest):
     except Exception as e:
         logger.error(f"【记忆检索-多库】未知异常: {str(e)}")
         raise HTTPException(status_code=500, detail=f"检索失败: {str(e)}")
+
+
+@app.get("/api/users")
+async def list_users():
+    """
+    获取用户列表（从 user 库中检索所有不同的 user_id）
+    返回格式: {"users": ["user_001", "user_002", ...], "default": "user_001"}
+    """
+    try:
+        coll = get_collection_by_key("user")
+        # 使用一个通用查询来获取所有用户（VikingDB可能不支持直接列出所有user_id，这里返回默认列表）
+        # 实际场景中，你可能需要维护一个用户列表或使用其他方式
+        # 这里先返回一个默认列表，后续可以根据实际需求调整
+        default_users = ["user_001", "user_002", "user_003"]
+        return {"users": default_users, "default": default_users[0]}
+    except Exception as e:
+        logger.warning(f"【获取用户列表】失败，返回默认列表: {str(e)}")
+        default_users = ["user_001"]
+        return {"users": default_users, "default": default_users[0]}
+
+
+@app.get("/api/dogs")
+async def list_dogs():
+    """
+    获取狗列表（从 dog 库中检索所有不同的 user_id，在dog库中user_id实际代表dog_id）
+    返回格式: {"dogs": ["dog_001", "dog_002", ...], "default": "dog_001"}
+    """
+    try:
+        coll = get_collection_by_key("dog")
+        # 类似用户列表，返回默认列表
+        default_dogs = ["dog_001", "dog_002", "dog_003"]
+        return {"dogs": default_dogs, "default": default_dogs[0]}
+    except Exception as e:
+        logger.warning(f"【获取狗列表】失败，返回默认列表: {str(e)}")
+        default_dogs = ["dog_001"]
+        return {"dogs": default_dogs, "default": default_dogs[0]}
+
+
+@app.get("/api/conversations")
+async def list_conversations(user_id: str, dog_id: str):
+    """
+    获取历史会话列表（从 conversation 库中检索指定用户和狗的所有会话）
+    返回格式: {"conversations": [{"id": "conv_001", "title": "...", "last_message_time": ...}, ...]}
+    """
+    try:
+        coll = get_collection_by_key("conversation")
+        # 搜索该用户和狗的所有会话记录
+        # 使用一个通用查询来获取会话
+        result = coll.search_memory(
+            query="对话 会话",
+            filter={
+                "memory_type": ["event_v1"],
+                "user_id": user_id,
+                "assistant_id": dog_id,
+            },
+            limit=100  # 获取更多记录以便提取所有会话ID
+        )
+        
+        conversations_map = {}
+        if result and isinstance(result, dict) and result.get('data'):
+            result_data = result['data']
+            if result_data.get('count', 0) > 0 and 'result_list' in result_data:
+                for item in result_data['result_list']:
+                    metadata = item.get('metadata', {})
+                    conv_id = metadata.get('conversation_id', '')
+                    if not conv_id:
+                        # 如果没有conversation_id，使用session_id的前缀部分
+                        session_id = item.get('session_id', '')
+                        if session_id and '_' in session_id:
+                            conv_id = session_id.split('_')[0]
+                    
+                    if conv_id and conv_id not in conversations_map:
+                        time_stamp = item.get('time', 0) or metadata.get('time', 0)
+                        memory_info = item.get('memory_info', {})
+                        messages = memory_info.get('original_messages', '') or memory_info.get('summary', '')
+                        title = messages[:50] + "..." if len(messages) > 50 else messages or "新对话"
+                        
+                        conversations_map[conv_id] = {
+                            "id": conv_id,
+                            "title": title,
+                            "last_message_time": time_stamp,
+                        }
+        
+        conversations = list(conversations_map.values())
+        # 按时间倒序排序
+        conversations.sort(key=lambda x: x.get('last_message_time', 0), reverse=True)
+        
+        # 如果没有找到历史会话，返回一个默认的新会话ID
+        if not conversations:
+            default_conv_id = f"conv_{user_id}_{dog_id}_{datetime.now().strftime('%Y%m%d')}"
+            conversations = [{
+                "id": default_conv_id,
+                "title": "新对话",
+                "last_message_time": int(datetime.now().timestamp() * 1000),
+            }]
+        
+        return {"conversations": conversations}
+    except Exception as e:
+        logger.warning(f"【获取会话列表】失败: {str(e)}")
+        # 返回一个默认会话
+        default_conv_id = f"conv_{user_id}_{dog_id}_{datetime.now().strftime('%Y%m%d')}"
+        return {
+            "conversations": [{
+                "id": default_conv_id,
+                "title": "新对话",
+                "last_message_time": int(datetime.now().timestamp() * 1000),
+            }]
+        }
 
 if __name__ == "__main__":
     import uvicorn

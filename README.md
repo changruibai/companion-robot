@@ -39,8 +39,16 @@ export OPENAI_API_KEY="your-openai-api-key"
 # VikingDB 配置（已在代码中设置默认值，可覆盖）
 export VIKINGDB_AK="your-vikingdb-ak"
 export VIKINGDB_SK="your-vikingdb-sk"
-export VIKINGDB_COLLECTION="dogbot"
 export VIKINGDB_PROJECT="default"
+
+# VikingDB 多库（推荐：分别对应 user / dog / relationship / conversation）
+export VIKINGDB_COLLECTION_USER="user"
+export VIKINGDB_COLLECTION_DOG="dog"
+export VIKINGDB_COLLECTION_RELATIONSHIP="relationship"
+export VIKINGDB_COLLECTION_CONVERSATION="conversation"
+
+# 兼容旧逻辑（可选）：未指定 collection_key 时使用 default
+export VIKINGDB_COLLECTION="dogbot"
 ```
 
 ### 2. 安装 Python 依赖
@@ -109,6 +117,14 @@ npm run dev
 ### GET /api/health
 
 健康检查接口
+
+### 多用户 / 多狗 / 多对话调试接口（新）
+
+- `GET /api/collections`：查看后端当前绑定的四个 collection 名称（便于确认写入目标）
+- `POST /api/memory/profile/add`：指定 `collection_key` 写入画像（profile_v1）
+- `POST /api/memory/session/add`：指定 `collection_key` 写入会话（event_v1）
+- `POST /api/memory/search`：指定 `collection_key` 检索记忆
+- `POST /api/debug/chat`：跨 `user/dog/relationship/conversation` 四库召回上下文并回答，同时把本轮写入 `conversation` 库
 
 ## 使用说明
 

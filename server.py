@@ -83,28 +83,66 @@ def init_viking_client():
     )
     return client
 
-# 全局变量存储客户端和集合
+#
+# 多 Collection 支持：
+# - 你可以在环境变量中配置不同的 collection 名称：
+#   - VIKINGDB_COLLECTION_USER / _DOG / _RELATIONSHIP / _CONVERSATION
+# - 也兼容旧的 VIKINGDB_COLLECTION（作为 default）
+#
 viking_client = None
-collection = None
+collections_by_key = {}
 
-def get_collection():
-    """获取或初始化集合"""
-    global viking_client, collection
+COLLECTION_ENV_BY_KEY = {
+    "user": "VIKINGDB_COLLECTION_USER",
+    "dog": "VIKINGDB_COLLECTION_DOG",
+    "relationship": "VIKINGDB_COLLECTION_RELATIONSHIP",
+    "conversation": "VIKINGDB_COLLECTION_CONVERSATION",
+    # 兼容旧逻辑：未指定 key 时使用 default
+    "default": "VIKINGDB_COLLECTION",
+}
+
+COLLECTION_DEFAULT_NAME_BY_KEY = {
+    "user": "user",
+    "dog": "dog",
+    "relationship": "relationship",
+    "conversation": "conversation",
+    "default": "dogbot",
+}
+
+
+def get_collection_by_key(collection_key: str = "default"):
+    """按 key 获取或初始化集合（带缓存）"""
+    global viking_client, collections_by_key
+
+    if not collection_key:
+        collection_key = "default"
+    if collection_key not in COLLECTION_ENV_BY_KEY:
+        raise HTTPException(status_code=400, detail=f"未知 collection_key: {collection_key}")
+
     if viking_client is None:
         viking_client = init_viking_client()
-    
-    if collection is None:
-        collection_name = os.getenv("VIKINGDB_COLLECTION", "dogbot")
-        project_name = os.getenv("VIKINGDB_PROJECT", "default")
-        try:
-            collection = viking_client.get_collection(
-                collection_name=collection_name,
-                project_name=project_name
-            )
-        except VikingMemException as e:
-            raise HTTPException(status_code=500, detail=f"无法获取集合: {str(e)}")
-    
-    return collection
+
+    if collection_key in collections_by_key:
+        return collections_by_key[collection_key]
+
+    env_name = COLLECTION_ENV_BY_KEY[collection_key]
+    collection_name = os.getenv(env_name, COLLECTION_DEFAULT_NAME_BY_KEY[collection_key])
+    project_name = os.getenv("VIKINGDB_PROJECT", "default")
+    try:
+        coll = viking_client.get_collection(
+            collection_name=collection_name,
+            project_name=project_name,
+        )
+        collections_by_key[collection_key] = coll
+        logger.info(f"已初始化 collection: key={collection_key}, name={collection_name}, project={project_name}")
+        return coll
+    except VikingMemException as e:
+        raise HTTPException(status_code=500, detail=f"无法获取集合({collection_key}/{collection_name}): {str(e)}")
+
+
+def get_collection():
+    """兼容旧代码：返回 default 集合"""
+    return get_collection_by_key("default")
 
 # 请求模型
 class QueryRequest(BaseModel):
@@ -138,13 +176,63 @@ class ProfileUpdateRequest(BaseModel):
     profile_id: str                    # 需要更新的画像记忆 id
     memory_info: Optional[dict] = None
 
+
+class MultiCollectionProfileAddRequest(ProfileAddRequest):
+    collection_key: str = "default"
+
+
+class MultiCollectionProfileUpdateRequest(ProfileUpdateRequest):
+    collection_key: str = "default"
+
+
+class SessionAddRequest(BaseModel):
+    """
+    写入会话记忆（event_v1），用于 conversation 库等。
+    """
+    collection_key: str = "default"
+    session_id: str
+    user_id: str
+    assistant_id: str
+    messages: List[dict]
+    metadata: Optional[dict] = None
+
+
+class MemorySearchRequest(BaseModel):
+    """
+    通用记忆检索封装
+    """
+    collection_key: str = "default"
+    query: str
+    filter: Optional[dict] = None
+    limit: Optional[int] = 5
+
 class QueryResponse(BaseModel):
     answer: str
     memories: List[dict]
     sources: List[str]
 
-def search_viking_memories(query: str, user_id: str, assistant_id: str, limit: int = 5):
-    """搜索 VikingDB 记忆库"""
+class DebugChatRequest(BaseModel):
+    """
+    多用户 + 多狗 + 多对话 的调试聊天请求
+    - user_id: 用户唯一标识（用于 user 库）
+    - dog_id: 机器狗唯一标识（用于 dog 库）
+    - conversation_id: 对话唯一标识（用于 conversation 库；将写入 conversation_id + 时间戳）
+    """
+    query: str
+    user_id: str
+    dog_id: str
+    conversation_id: str
+    assistant_id: Optional[str] = "assistant_001"
+    limit: Optional[int] = 5
+
+
+class DebugChatResponse(BaseModel):
+    answer: str
+    context: dict
+    write_result: Optional[dict] = None
+
+def search_viking_memories(query: str, user_id: str, assistant_id: str, limit: int = 5, collection_key: str = "default", extra_filter: Optional[dict] = None):
+    """搜索 VikingDB 记忆库（可指定 collection_key）"""
     # 记录查询参数
     query_params = {
         "query": query,
@@ -155,12 +243,14 @@ def search_viking_memories(query: str, user_id: str, assistant_id: str, limit: i
     logger.info(f"【VikingDB查询请求】: {json.dumps(query_params, ensure_ascii=False, indent=2)}")
     
     try:
-        coll = get_collection()
+        coll = get_collection_by_key(collection_key)
         filter_params = {
             "memory_type": ["profile_v1", "event_v1"],
             "user_id": user_id,
             "assistant_id": assistant_id
         }
+        if extra_filter and isinstance(extra_filter, dict):
+            filter_params.update(extra_filter)
         logger.info(f"过滤条件: {json.dumps(filter_params, ensure_ascii=False, indent=2)}")
         
         result = coll.search_memory(
@@ -511,6 +601,101 @@ async def query_memory(request: QueryRequest):
         raise HTTPException(status_code=500, detail=error_detail)
 
 
+@app.post("/api/debug/chat", response_model=DebugChatResponse)
+async def debug_chat(request: DebugChatRequest):
+    """
+    调试用：跨 user/dog/relationship/conversation 四库召回上下文，然后生成回答，并把本轮写入 conversation 库。
+    约定：
+    - user 库：user_id = request.user_id, assistant_id = request.assistant_id
+    - dog 库：user_id = request.dog_id, assistant_id = request.assistant_id
+    - relationship 库：user_id = request.user_id, assistant_id = request.dog_id
+    - conversation 库：基于 metadata 中 default_user_id/default_assistant_id 建索引，因此 filter 同上（user_id/assistant_id）
+    """
+    # 1) 召回 user 画像/事件
+    user_mems, _ = search_viking_memories(
+        query=request.query,
+        user_id=request.user_id,
+        assistant_id=request.assistant_id or "assistant_001",
+        limit=request.limit or 5,
+        collection_key="user",
+    )
+
+    # 2) 召回 dog 画像/事件
+    dog_mems, _ = search_viking_memories(
+        query=request.query,
+        user_id=request.dog_id,
+        assistant_id=request.assistant_id or "assistant_001",
+        limit=request.limit or 5,
+        collection_key="dog",
+    )
+
+    # 3) 召回 relationship（用户-狗）
+    rel_mems, _ = search_viking_memories(
+        query=request.query,
+        user_id=request.user_id,
+        assistant_id=request.dog_id,
+        limit=request.limit or 5,
+        collection_key="relationship",
+    )
+
+    # 4) 召回 conversation（用户-狗 的历史对话）
+    conv_mems, _ = search_viking_memories(
+        query=request.query,
+        user_id=request.user_id,
+        assistant_id=request.dog_id,
+        limit=request.limit or 5,
+        collection_key="conversation",
+    )
+
+    # 5) 合并上下文生成回答
+    merged_memories = []
+    for m in user_mems:
+        merged_memories.append({**m, "collection_key": "user"})
+    for m in dog_mems:
+        merged_memories.append({**m, "collection_key": "dog"})
+    for m in rel_mems:
+        merged_memories.append({**m, "collection_key": "relationship"})
+    for m in conv_mems:
+        merged_memories.append({**m, "collection_key": "conversation"})
+
+    answer = generate_answer_with_ai(request.query, merged_memories)
+
+    # 6) 写入本轮对话到 conversation（用 conversation_id + 时间戳，保证每轮都落库）
+    write_result = None
+    try:
+        coll = get_collection_by_key("conversation")
+        session_id = f"{request.conversation_id}_{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
+        messages = [
+            {"role": "user", "content": request.query},
+            {"role": "assistant", "content": answer},
+        ]
+        metadata = {
+            "default_user_id": request.user_id,
+            "default_assistant_id": request.dog_id,
+            "conversation_id": request.conversation_id,
+            "time": int(datetime.now().timestamp() * 1000),
+        }
+        write_result = coll.add_session(
+            session_id=session_id,
+            messages=messages,
+            metadata=metadata,
+        )
+        logger.info(f"【debug_chat 会话写入】成功: {json.dumps(write_result, ensure_ascii=False, default=str)}")
+    except Exception as e:
+        logger.warning(f"【debug_chat 会话写入】失败（不影响返回）: {str(e)}")
+
+    return DebugChatResponse(
+        answer=answer,
+        context={
+            "user": user_mems,
+            "dog": dog_mems,
+            "relationship": rel_mems,
+            "conversation": conv_mems,
+        },
+        write_result=write_result,
+    )
+
+
 @app.post("/api/profile/add")
 async def add_profile(request: ProfileAddRequest):
     """
@@ -522,7 +707,7 @@ async def add_profile(request: ProfileAddRequest):
     https://www.volcengine.com/docs/84313/1946680?lang=zh
     """
     logger.info("【添加画像记忆】开始")
-    logger.info(f"请求参数: {request.json(ensure_ascii=False)}")
+    logger.info(f"请求参数: {json.dumps(request.model_dump(), ensure_ascii=False)}")
 
     try:
         coll = get_collection()
@@ -554,7 +739,7 @@ async def update_profile(request: ProfileUpdateRequest):
     https://www.volcengine.com/docs/84313/1946684?lang=zh
     """
     logger.info("【更新画像记忆】开始")
-    logger.info(f"请求参数: {request.json(ensure_ascii=False)}")
+    logger.info(f"请求参数: {json.dumps(request.model_dump(), ensure_ascii=False)}")
 
     try:
         coll = get_collection()
@@ -580,6 +765,111 @@ async def health_check():
         return {"status": "healthy", "vikingdb": "connected"}
     except Exception as e:
         return {"status": "unhealthy", "error": str(e)}
+
+
+@app.get("/api/collections")
+async def list_collections():
+    """
+    返回后端支持的 collection_key 以及实际使用的 collection_name（便于前端调试确认写入目标）。
+    """
+    project_name = os.getenv("VIKINGDB_PROJECT", "default")
+    result = {"project": project_name, "collections": {}}
+    for key, env_name in COLLECTION_ENV_BY_KEY.items():
+        name = os.getenv(env_name, COLLECTION_DEFAULT_NAME_BY_KEY[key])
+        result["collections"][key] = {"collection_name": name, "env": env_name}
+    return result
+
+
+@app.post("/api/memory/profile/add")
+async def add_profile_multi(request: MultiCollectionProfileAddRequest):
+    logger.info("【添加画像记忆-多库】开始")
+    logger.info(f"请求参数: {json.dumps(request.model_dump(), ensure_ascii=False)}")
+    try:
+        coll = get_collection_by_key(request.collection_key)
+        result = coll.add_profile(
+            profile_type=request.profile_type,
+            memory_info=request.memory_info,
+            user_id=request.user_id,
+            assistant_id=request.assistant_id,
+            group_id=request.group_id,
+            is_upsert=request.is_upsert,
+        )
+        logger.info(f"【添加画像记忆-多库】成功: {json.dumps(result, ensure_ascii=False, default=str)}")
+        return result
+    except VikingMemException as e:
+        logger.error(f"【添加画像记忆-多库】VikingMem 异常: {e.message}")
+        raise HTTPException(status_code=500, detail=f"添加画像失败: {e.message}")
+    except Exception as e:
+        logger.error(f"【添加画像记忆-多库】未知异常: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"添加画像失败: {str(e)}")
+
+
+@app.post("/api/memory/profile/update")
+async def update_profile_multi(request: MultiCollectionProfileUpdateRequest):
+    logger.info("【更新画像记忆-多库】开始")
+    logger.info(f"请求参数: {json.dumps(request.model_dump(), ensure_ascii=False)}")
+    try:
+        coll = get_collection_by_key(request.collection_key)
+        kwargs = {"profile_id": request.profile_id}
+        if request.memory_info is not None:
+            kwargs["memory_info"] = request.memory_info
+        result = coll.update_profile(**kwargs)
+        logger.info(f"【更新画像记忆-多库】成功: {json.dumps(result, ensure_ascii=False, default=str)}")
+        return result
+    except VikingMemException as e:
+        logger.error(f"【更新画像记忆-多库】VikingMem 异常: {e.message}")
+        raise HTTPException(status_code=500, detail=f"更新画像失败: {e.message}")
+    except Exception as e:
+        logger.error(f"【更新画像记忆-多库】未知异常: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"更新画像失败: {str(e)}")
+
+
+@app.post("/api/memory/session/add")
+async def add_session_multi(request: SessionAddRequest):
+    logger.info("【会话写入-多库】开始")
+    logger.info(f"请求参数: {json.dumps(request.model_dump(), ensure_ascii=False)}")
+    try:
+        coll = get_collection_by_key(request.collection_key)
+        base_metadata = {
+            "default_user_id": request.user_id,
+            "default_assistant_id": request.assistant_id,
+            "time": int(datetime.now().timestamp() * 1000),
+        }
+        if request.metadata and isinstance(request.metadata, dict):
+            base_metadata.update(request.metadata)
+        result = coll.add_session(
+            session_id=request.session_id,
+            messages=request.messages,
+            metadata=base_metadata,
+        )
+        logger.info(f"【会话写入-多库】成功: {json.dumps(result, ensure_ascii=False, default=str)}")
+        return result
+    except VikingMemException as e:
+        logger.error(f"【会话写入-多库】VikingMem 异常: {e.message}")
+        raise HTTPException(status_code=500, detail=f"会话写入失败: {e.message}")
+    except Exception as e:
+        logger.error(f"【会话写入-多库】未知异常: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"会话写入失败: {str(e)}")
+
+
+@app.post("/api/memory/search")
+async def search_memory_multi(request: MemorySearchRequest):
+    logger.info("【记忆检索-多库】开始")
+    logger.info(f"请求参数: {json.dumps(request.model_dump(), ensure_ascii=False)}")
+    try:
+        coll = get_collection_by_key(request.collection_key)
+        result = coll.search_memory(
+            query=request.query,
+            filter=request.filter or {},
+            limit=request.limit or 5,
+        )
+        return result
+    except VikingMemException as e:
+        logger.error(f"【记忆检索-多库】VikingMem 异常: {e.message}")
+        raise HTTPException(status_code=500, detail=f"检索失败: {e.message}")
+    except Exception as e:
+        logger.error(f"【记忆检索-多库】未知异常: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"检索失败: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn

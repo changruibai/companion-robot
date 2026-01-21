@@ -5,9 +5,13 @@ VikingDB 会话记忆完整示例
 
 import os
 from datetime import datetime
+from dotenv import load_dotenv
 from vikingdb import IAM
 from vikingdb.memory import VikingMem
 from vikingdb.memory.exceptions import VikingMemException
+
+# 加载 .env 文件中的环境变量
+load_dotenv()
 
 def init_memory_client():
     """初始化记忆库客户端"""

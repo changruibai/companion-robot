@@ -5,6 +5,7 @@ import os
 import json
 import logging
 from datetime import datetime
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -13,6 +14,9 @@ from openai import OpenAI
 from vikingdb import IAM
 from vikingdb.memory import VikingMem
 from vikingdb.memory.exceptions import VikingMemException
+
+# 加载 .env 文件中的环境变量
+load_dotenv()
 
 # 配置日志
 def setup_logging():

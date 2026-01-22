@@ -1,6 +1,6 @@
 import { useState } from 'react'
 
-const MessageBubble = ({ message }) => {
+const MessageBubble = ({ message, isTyping = false }) => {
   const isUser = message.role === 'user'
   const timeStr = message.timestamp.toLocaleTimeString('zh-CN', { 
     hour: '2-digit', 
@@ -44,7 +44,23 @@ const MessageBubble = ({ message }) => {
               ? 'bg-gradient-to-r from-blue-500 to-purple-600 text-white rounded-tr-none' 
               : 'bg-white text-gray-800 rounded-tl-none border border-gray-100'
           }`}>
-            <p className="text-sm whitespace-pre-wrap break-words">{message.content}</p>
+            <div className="flex items-start gap-2">
+              {message.content ? (
+                <p className="text-sm whitespace-pre-wrap break-words flex-1">{message.content}</p>
+              ) : (
+                <p className="text-sm whitespace-pre-wrap break-words flex-1"></p>
+              )}
+            </div>
+            {/* 打字指示器 - 只在助手消息且正在输入时显示 */}
+              <div className='mt-2 ml-2'>
+                {!isUser && isTyping && (
+                <div className="flex items-center space-x-1 flex-shrink-0 self-end">
+                  <div className="w-1.5 h-1.5 bg-purple-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
+                  <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
+                  <div className="w-1.5 h-1.5 bg-pink-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
+                </div>
+              )}
+              </div>
             
             {/* 显示记忆库来源（如果有） */}
             {!isUser && message.memories && message.memories.length > 0 && (

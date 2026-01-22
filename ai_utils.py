@@ -243,6 +243,141 @@ def generate_answer_with_dog_persona(
         return error_msg
 
 
+def generate_answer_with_dog_persona_stream(
+    query: str,
+    user_memories: List[dict],
+    dog_memories: List[dict],
+    relationship_memories: List[dict],
+    conversation_memories: List[dict],
+    model: str = "chatgpt"
+):
+    """
+    流式版本的机器狗回答生成函数，支持实时返回内容
+    
+    Args:
+        query: 用户问题
+        user_memories: 用户记忆列表
+        dog_memories: 狗的记忆列表
+        relationship_memories: 关系记忆列表
+        conversation_memories: 对话记忆列表
+        model: 使用的模型（chatgpt / deepseek）
+    
+    Yields:
+        每个 token 的内容（字符串）
+    """
+    logger.info(f"【机器狗回答生成-流式】开始，使用模型: {model}")
+    logger.info(f"用户问题: {query}")
+    
+    # 提取狗的信息
+    dog_info = extract_dog_info(dog_memories)
+    dog_name = dog_info["name"]
+    dog_character = dog_info["character"]
+    dog_tone = dog_info["tone"]
+    
+    # 提取用户昵称
+    user_nickname = extract_user_nickname(user_memories)
+    
+    # 组织关系记忆
+    relationship_summary = _organize_relationship_memories(relationship_memories)
+    
+    # 组织对话记忆（最近的2条）
+    conversation_items = _organize_memories(conversation_memories, max_items=2, max_len=80)
+    if not conversation_items:
+        conversation_items = ["你们刚刚开始对话"]
+    
+    # 组织用户记忆（最多2条）
+    user_memory_items = _organize_memories(user_memories, max_items=2, max_len=80)
+    if not user_memory_items:
+        user_memory_items = ["你对这个人的了解还在建立中"]
+    
+    # 组织狗的记忆（最多1条）
+    dog_memory_items = _organize_memories(dog_memories, max_items=1, max_len=80)
+    if not dog_memory_items:
+        dog_memory_items = ["你正在学习和成长"]
+    
+    # 构建模板化的提示词
+    system_prompt = """你是一只陪伴型机器狗，需要以真实、自然的方式与用户对话。
+你的回答要：
+- 情绪真实，体现机器狗的性格特点
+- 不重复旧话，每次回答都要有新意
+- 不暴露记忆来源，自然地融入对话中
+- 基于提供的记忆信息，但要用自己的话表达
+- 保持角色一致性，始终以机器狗的身份说话"""
+    
+    user_prompt = f"""【你的身份】
+你是一只陪伴型机器狗，名字是 {dog_name}。
+你的性格是：{dog_character}
+你的说话风格是：{dog_tone}
+
+【你和这个人的长期关系】
+你和 {user_nickname} 已经相处了一段时间，你们的关系特点是：
+- {relationship_summary}
+
+【你们当前阶段的共同记忆】
+{chr(10).join([f"- {item}" for item in conversation_items])}
+
+【关于这个人】
+你对他的长期了解包括：
+{chr(10).join([f"- {item}" for item in user_memory_items])}
+
+【你自己的成长】
+{chr(10).join([f"- {item}" for item in dog_memory_items])}
+
+【当前对话】
+用户：{query}
+
+请你以陪伴型机器狗的身份回应：
+- 情绪真实
+- 不重复旧话
+- 不暴露记忆来源"""
+    
+    # 根据模型选择客户端和模型名称
+    if model == "deepseek":
+        if not deepseek_client:
+            error_msg = "抱歉，DeepSeek 服务未配置，请设置 DEEPSEEK_API_KEY 环境变量"
+            logger.error(error_msg)
+            yield error_msg
+            return
+        client = deepseek_client
+        model_name = "deepseek-chat"
+    else:  # 默认使用 chatgpt
+        client = openai_client
+        model_name = "gpt-4o-mini"
+    
+    # 记录请求参数
+    request_params = {
+        "model": model_name,
+        "temperature": 0.8,
+        "max_tokens": 500,
+        "stream": True,
+    }
+    logger.info(f"【机器狗回答生成-流式】请求参数: {json.dumps(request_params, ensure_ascii=False, indent=2)}")
+    
+    try:
+        stream = client.chat.completions.create(
+            model=model_name,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            temperature=0.8,
+            max_tokens=500,
+            stream=True
+        )
+        
+        for chunk in stream:
+            if chunk.choices and len(chunk.choices) > 0:
+                delta = chunk.choices[0].delta
+                if delta and delta.content:
+                    yield delta.content
+        
+        logger.info(f"【机器狗回答生成-流式】成功（{model.upper()}）")
+    except Exception as e:
+        error_msg = f"抱歉，AI 服务暂时不可用: {str(e)}"
+        logger.error(f"【机器狗回答生成-流式】调用失败（{model.upper()}）: {str(e)}")
+        yield error_msg
+
+
 def _organize_relationship_memories(relationship_memories: List[dict]) -> str:
     """组织关系记忆摘要"""
     if relationship_memories:

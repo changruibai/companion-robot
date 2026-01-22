@@ -3,8 +3,10 @@ API 路由模块：所有 FastAPI 路由处理函数
 """
 import os
 import json
+import asyncio
 from datetime import datetime
 from fastapi import HTTPException
+from fastapi.responses import StreamingResponse
 from vikingdb.memory.exceptions import VikingMemException
 
 from config import (
@@ -25,6 +27,7 @@ from memory_utils import (
 )
 from ai_utils import (
     generate_answer_with_ai, generate_answer_with_dog_persona,
+    generate_answer_with_dog_persona_stream,
     decide_memory_writing, extract_profile_info_with_ai
 )
 from memory_writing import (
@@ -164,18 +167,20 @@ def setup_routes(app):
     
     # ==================== 调试聊天路由 ====================
     
-    @app.post("/api/debug/chat", response_model=DebugChatResponse)
+    @app.post("/api/debug/chat")
     async def debug_chat(request: DebugChatRequest):
         """
-        调试用：跨 user/dog/relationship/conversation 四库召回上下文，然后生成回答，并把本轮写入 conversation 库
+        调试用：跨 user/dog/relationship/conversation 四库召回上下文，然后生成流式回答，并把本轮写入 conversation 库
         
         约定：
         - user 库：user_id = request.user_id, assistant_id = request.assistant_id
         - dog 库：user_id = request.dog_id, assistant_id = request.assistant_id
         - relationship 库：user_id = request.user_id, assistant_id = request.dog_id
         - conversation 库：基于 metadata 中 default_user_id/default_assistant_id 建索引
+        
+        返回流式响应（SSE格式）
         """
-        logger.info("【调试聊天】开始处理")
+        logger.info("【调试聊天-流式】开始处理")
         logger.info(f"请求参数: user_id={request.user_id}, dog_id={request.dog_id}, conversation_id={request.conversation_id}")
         
         # 校验合法性
@@ -191,133 +196,155 @@ def setup_routes(app):
         conversation_id = request.conversation_id
         assistant_id = request.assistant_id or "assistant_001"
         
-        try:
-            # 1) 召回 user 画像/事件
-            user_mems, _ = search_viking_memories(
-                query=request.query,
-                user_id=user_id,
-                assistant_id=assistant_id,
-                limit=request.limit or 5,
-                collection_key="user",
-            )
-            
-            # 2) 召回 dog 画像/事件
-            dog_mems, _ = search_viking_memories(
-                query=request.query,
-                user_id=dog_id,
-                assistant_id=assistant_id,
-                limit=request.limit or 5,
-                collection_key="dog",
-            )
-            
-            # 3) 召回 relationship（用户-狗）
-            rel_mems, _ = search_viking_memories(
-                query=request.query,
-                user_id=user_id,
-                assistant_id=dog_id,
-                limit=request.limit or 5,
-                collection_key="relationship",
-            )
-            
-            # 4) 召回 conversation（用户-狗 的历史对话）
-            conv_mems, _ = search_viking_memories(
-                query=request.query,
-                user_id=user_id,
-                assistant_id=dog_id,
-                limit=request.limit or 5,
-                collection_key="conversation",
-            )
-            
-            # 5) 使用机器狗角色模板生成回答
-            answer = generate_answer_with_dog_persona(
-                query=request.query,
-                user_memories=user_mems,
-                dog_memories=dog_mems,
-                relationship_memories=rel_mems,
-                conversation_memories=conv_mems,
-                model=request.model or "chatgpt"
-            )
-            
-            # 6) 记忆写入决策：是否写入？写入到哪里？
-            memory_decision = decide_memory_writing(
-                user_id=user_id,
-                dog_id=dog_id,
-                conversation_id=conversation_id,
-                query=request.query,
-                answer=answer,
-                user_memories=user_mems,
-                dog_memories=dog_mems,
-                relationship_memories=rel_mems,
-                conversation_memories=conv_mems,
-                model=request.model or "chatgpt",
-            )
-            
-            # 7) 基于决策结果，将用户长期特征 / 关系里程碑 / 机器狗认知变化写入对应库
-            extra_write_results = apply_memory_writing_decision(
-                decision=memory_decision or {},
-                user_id=user_id,
-                dog_id=dog_id,
-                conversation_id=conversation_id,
-                assistant_id=assistant_id,
-                query=request.query,
-                answer=answer,
-            )
-            
-            # 8) 写入本轮对话到 conversation（用 conversation_id + 时间戳，保证每轮都落库）
-            write_result = None
+        async def generate_stream():
+            full_answer = ""
             try:
-                coll = get_collection_by_key("conversation")
-                session_id = f"{conversation_id}_{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
-                messages = [
-                    {"role": "user", "content": request.query},
-                    {"role": "assistant", "content": answer},
-                ]
-                metadata = {
-                    "default_user_id": user_id,
-                    "default_assistant_id": dog_id,
-                    "conversation_id": conversation_id,
-                    "time": int(datetime.now().timestamp() * 1000),
-                }
-                # 将记忆写入决策的关键信息也写入 metadata，便于后续检索和调试
-                if memory_decision:
-                    metadata["memory_decision"] = {
-                        "should_write": bool(memory_decision.get("should_write")),
-                        "has_emotion_change": bool(memory_decision.get("has_emotion_change")),
-                        "is_relationship_turning": bool(memory_decision.get("is_relationship_turning")),
-                        "is_duplicate": bool(memory_decision.get("is_duplicate")),
-                        "targets": memory_decision.get("targets") or [],
-                    }
-                    conv_summary = (memory_decision.get("memories") or {}).get("conversation")
-                    if conv_summary:
-                        metadata["conversation_summary_by_dog"] = str(conv_summary)
-                
-                write_result = coll.add_session(
-                    session_id=session_id,
-                    messages=messages,
-                    metadata=metadata,
+                # 1) 召回 user 画像/事件
+                user_mems, _ = search_viking_memories(
+                    query=request.query,
+                    user_id=user_id,
+                    assistant_id=assistant_id,
+                    limit=request.limit or 5,
+                    collection_key="user",
                 )
-                logger.info(f"【调试聊天-会话写入】成功: {json.dumps(write_result, ensure_ascii=False, default=str)}")
+                
+                # 2) 召回 dog 画像/事件
+                dog_mems, _ = search_viking_memories(
+                    query=request.query,
+                    user_id=dog_id,
+                    assistant_id=assistant_id,
+                    limit=request.limit or 5,
+                    collection_key="dog",
+                )
+                
+                # 3) 召回 relationship（用户-狗）
+                rel_mems, _ = search_viking_memories(
+                    query=request.query,
+                    user_id=user_id,
+                    assistant_id=dog_id,
+                    limit=request.limit or 5,
+                    collection_key="relationship",
+                )
+                
+                # 4) 召回 conversation（用户-狗 的历史对话）
+                conv_mems, _ = search_viking_memories(
+                    query=request.query,
+                    user_id=user_id,
+                    assistant_id=dog_id,
+                    limit=request.limit or 5,
+                    collection_key="conversation",
+                )
+                
+                # 5) 使用机器狗角色模板生成流式回答
+                logger.info("【调试聊天-流式】开始生成流式回答")
+                chunk_count = 0
+                stream_generator = generate_answer_with_dog_persona_stream(
+                    query=request.query,
+                    user_memories=user_mems,
+                    dog_memories=dog_mems,
+                    relationship_memories=rel_mems,
+                    conversation_memories=conv_mems,
+                    model=request.model or "chatgpt"
+                )
+                
+                # 在 async 函数中迭代同步生成器，确保每个 chunk 立即发送
+                # 注意：OpenAI 的流式响应是同步的，但我们需要在 async 上下文中处理
+                for chunk in stream_generator:
+                    chunk_count += 1
+                    full_answer += chunk
+                    # 发送 SSE 格式的数据，确保立即发送
+                    sse_data = json.dumps({'content': chunk, 'done': False}, ensure_ascii=False)
+                    logger.info(f"【调试聊天-流式】准备发送第 {chunk_count} 个chunk (长度: {len(chunk)}, 内容: {repr(chunk[:30])})")
+                    # 使用 \n\n 确保 SSE 事件立即发送
+                    sse_message = f"data: {sse_data}\n\n"
+                    yield sse_message
+                    # 让出控制权，确保数据立即刷新到客户端
+                    await asyncio.sleep(0)
+                    logger.debug(f"【调试聊天-流式】已发送第 {chunk_count} 个chunk")
+                
+                logger.info(f"【调试聊天-流式】流式回答生成完成，共 {chunk_count} 个chunk，总长度: {len(full_answer)}")
+                
+                # 6) 记忆写入决策：是否写入？写入到哪里？
+                memory_decision = decide_memory_writing(
+                    user_id=user_id,
+                    dog_id=dog_id,
+                    conversation_id=conversation_id,
+                    query=request.query,
+                    answer=full_answer,
+                    user_memories=user_mems,
+                    dog_memories=dog_mems,
+                    relationship_memories=rel_mems,
+                    conversation_memories=conv_mems,
+                    model=request.model or "chatgpt",
+                )
+                
+                # 7) 基于决策结果，将用户长期特征 / 关系里程碑 / 机器狗认知变化写入对应库
+                extra_write_results = apply_memory_writing_decision(
+                    decision=memory_decision or {},
+                    user_id=user_id,
+                    dog_id=dog_id,
+                    conversation_id=conversation_id,
+                    assistant_id=assistant_id,
+                    query=request.query,
+                    answer=full_answer,
+                )
+                
+                # 8) 写入本轮对话到 conversation（用 conversation_id + 时间戳，保证每轮都落库）
+                write_result = None
+                try:
+                    coll = get_collection_by_key("conversation")
+                    session_id = f"{conversation_id}_{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
+                    messages = [
+                        {"role": "user", "content": request.query},
+                        {"role": "assistant", "content": full_answer},
+                    ]
+                    metadata = {
+                        "default_user_id": user_id,
+                        "default_assistant_id": dog_id,
+                        "conversation_id": conversation_id,
+                        "time": int(datetime.now().timestamp() * 1000),
+                    }
+                    # 将记忆写入决策的关键信息也写入 metadata，便于后续检索和调试
+                    if memory_decision:
+                        metadata["memory_decision"] = {
+                            "should_write": bool(memory_decision.get("should_write")),
+                            "has_emotion_change": bool(memory_decision.get("has_emotion_change")),
+                            "is_relationship_turning": bool(memory_decision.get("is_relationship_turning")),
+                            "is_duplicate": bool(memory_decision.get("is_duplicate")),
+                            "targets": memory_decision.get("targets") or [],
+                        }
+                        conv_summary = (memory_decision.get("memories") or {}).get("conversation")
+                        if conv_summary:
+                            metadata["conversation_summary_by_dog"] = str(conv_summary)
+                    
+                    write_result = coll.add_session(
+                        session_id=session_id,
+                        messages=messages,
+                        metadata=metadata,
+                    )
+                    logger.info(f"【调试聊天-会话写入】成功: {json.dumps(write_result, ensure_ascii=False, default=str)}")
+                except Exception as e:
+                    logger.error(f"【调试聊天-会话写入】失败（不影响返回）: {str(e)}")
+                
+                # 发送完成信号
+                yield f"data: {json.dumps({'content': '', 'done': True, 'full_answer': full_answer}, ensure_ascii=False)}\n\n"
+                logger.info("【调试聊天-流式】处理完成")
             except Exception as e:
-                logger.error(f"【调试聊天-会话写入】失败（不影响返回）: {str(e)}")
-            
-            logger.info("【调试聊天】处理完成")
-            return DebugChatResponse(
-                answer=answer,
-                context={
-                    "user": user_mems,
-                    "dog": dog_mems,
-                    "relationship": rel_mems,
-                    "conversation": conv_mems,
-                    "memory_decision": memory_decision,
-                    "extra_write_results": extra_write_results,
-                },
-                write_result=write_result,
-            )
-        except Exception as e:
-            logger.error(f"【调试聊天】处理失败: {str(e)}")
-            import traceback
-            logger.error(f"堆栈跟踪:\n{traceback.format_exc()}")
-            raise HTTPException(status_code=500, detail=f"调试聊天失败: {str(e)}")
+                logger.error(f"【调试聊天-流式】处理失败: {str(e)}")
+                import traceback
+                logger.error(f"堆栈跟踪:\n{traceback.format_exc()}")
+                error_msg = json.dumps({'error': f"调试聊天失败: {str(e)}", 'done': True}, ensure_ascii=False)
+                yield f"data: {error_msg}\n\n"
+        
+        return StreamingResponse(
+            generate_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",  # 禁用 Nginx 缓冲
+            }
+        )
     
     
     # ==================== 画像路由（单库） ====================

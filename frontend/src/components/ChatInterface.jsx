@@ -182,47 +182,215 @@ const ChatInterface = () => {
     setInput('')
     setLoading(true)
 
+    // 创建助手消息占位符，用于流式更新
+    const assistantMessageId = Date.now()
+    const assistantMessage = {
+      id: assistantMessageId,
+      role: 'assistant',
+      content: '',
+      timestamp: new Date(),
+    }
+    setMessages(prev => [...prev, assistantMessage])
+
+    // 打字效果相关状态
+    let fullAnswerBuffer = '' // 存储完整答案（待显示的内容）
+    let displayedLength = 0 // 已显示的字符数
+    let typingTimer = null // 打字定时器
+    let isTypingActive = false // 打字效果是否激活
+
+    // 打字效果函数：逐字符显示
+    const typeWriter = () => {
+      if (!isTypingActive) return
+      
+      if (displayedLength < fullAnswerBuffer.length) {
+        // 每次显示更多字符，实现平滑的打字效果
+        // 根据剩余内容动态调整显示速度：内容多时快一点，少时慢一点
+        const remaining = fullAnswerBuffer.length - displayedLength
+        const charsToShow = remaining > 50 ? 5 : (remaining > 10 ? 3 : 1) // 每次显示1-5个字符
+        displayedLength = Math.min(displayedLength + charsToShow, fullAnswerBuffer.length)
+        const displayContent = fullAnswerBuffer.substring(0, displayedLength)
+        
+        setMessages(prev => prev.map(msg => 
+          msg.id === assistantMessageId 
+            ? { ...msg, content: displayContent }
+            : msg
+        ))
+        
+        // 继续打字效果
+        typingTimer = setTimeout(typeWriter, 200) // 每20ms显示一次，约150字符/秒
+      } else {
+        // 打字完成
+        isTypingActive = false
+      }
+    }
+
+    // 启动打字效果
+    const startTyping = () => {
+      if (!isTypingActive) {
+        isTypingActive = true
+        typeWriter()
+      }
+    }
+
+    // 停止打字效果并显示完整内容
+    const finishTyping = () => {
+      isTypingActive = false
+      if (typingTimer) {
+        clearTimeout(typingTimer)
+        typingTimer = null
+      }
+      // 立即显示完整内容
+      if (fullAnswerBuffer) {
+        setMessages(prev => prev.map(msg => 
+          msg.id === assistantMessageId 
+            ? { ...msg, content: fullAnswerBuffer }
+            : msg
+        ))
+      }
+    }
+
     try {
-      // 使用 debug_chat API，支持多用户/多狗/多对话
-      const response = await axios.post('/api/debug/chat', {
-        query: currentInput,
-        user_id: selectedUserId,
-        dog_id: selectedDogId,
-        conversation_id: selectedConversationId,
-        assistant_id: 'assistant_001',
-        limit: 5,
-        model: selectedModel
+      // 使用 fetch 接收流式响应
+      const response = await fetch('/api/debug/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          query: currentInput,
+          user_id: selectedUserId,
+          dog_id: selectedDogId,
+          conversation_id: selectedConversationId,
+          assistant_id: 'assistant_001',
+          limit: 5,
+          model: selectedModel
+        })
       })
 
-      const assistantMessage = {
-        role: 'assistant',
-        content: response.data.answer,
-        context: response.data.context,
-        timestamp: new Date(),
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
       }
 
-      setMessages(prev => [...prev, assistantMessage])
+      // 检查响应类型
+      const contentType = response.headers.get('content-type')
+      console.log('响应 Content-Type:', contentType)
       
-      // 更新会话列表（将当前会话移到最前面）
-      setConversations(prev => {
-        const updated = prev.map(conv => 
-          conv.id === selectedConversationId 
-            ? { ...conv, last_message_time: Date.now(), title: currentInput.slice(0, 50) + (currentInput.length > 50 ? '...' : '') }
-            : conv
-        )
-        // 按时间排序
-        updated.sort((a, b) => b.last_message_time - a.last_message_time)
-        return updated
-      })
+      if (!contentType || !contentType.includes('text/event-stream')) {
+        console.warn('响应不是 SSE 格式，尝试按普通 JSON 处理')
+        // 如果不是流式响应，尝试按普通 JSON 处理（向后兼容）
+        const data = await response.json()
+        if (data.answer) {
+          fullAnswerBuffer = data.answer
+          startTyping()
+          // 等待打字完成
+          setTimeout(() => {
+            finishTyping()
+            setLoading(false)
+          }, (data.answer.length / 3) * 30 + 100)
+        } else {
+          setLoading(false)
+        }
+        return
+      }
+
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      let chunkCount = 0
+
+      console.log('开始读取流式响应...')
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) {
+          console.log('流读取完成，总chunk数:', chunkCount, '总长度:', fullAnswerBuffer.length)
+          // 流结束时，如果还有内容但没有收到 done 信号，也要更新
+          if (buffer.trim()) {
+            // 处理最后可能剩余的数据
+            const lines = buffer.split('\n')
+            for (const line of lines) {
+              if (line.startsWith('data: ')) {
+                try {
+                  const data = JSON.parse(line.slice(6))
+                  if (data.content) {
+                    fullAnswerBuffer += data.content
+                    chunkCount++
+                  }
+                } catch (e) {
+                  console.error('解析最后的数据失败:', e)
+                }
+              }
+            }
+          }
+          // 确保打字效果完成
+          finishTyping()
+          break
+        }
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || '' // 保留最后一个不完整的行
+
+        for (const line of lines) {
+          if (line.trim() === '') continue // 跳过空行
+          if (line.startsWith('data: ')) {
+            try {
+              const data = JSON.parse(line.slice(6))
+              if (data.error) {
+                throw new Error(data.error)
+              }
+              if (data.content) {
+                chunkCount++
+                fullAnswerBuffer += data.content
+                console.log(`收到第 ${chunkCount} 个chunk，当前总长度: ${fullAnswerBuffer.length}`)
+                // 启动或继续打字效果
+                if (!isTypingActive) {
+                  startTyping()
+                }
+              }
+              if (data.done) {
+                console.log('收到完成信号')
+                finishTyping()
+                setLoading(false)
+                // 更新会话列表（将当前会话移到最前面）
+                setConversations(prev => {
+                  const updated = prev.map(conv => 
+                    conv.id === selectedConversationId 
+                      ? { ...conv, last_message_time: Date.now(), title: currentInput.slice(0, 50) + (currentInput.length > 50 ? '...' : '') }
+                      : conv
+                  )
+                  // 按时间排序
+                  updated.sort((a, b) => b.last_message_time - a.last_message_time)
+                  return updated
+                })
+              }
+            } catch (parseError) {
+              console.error('解析 SSE 数据失败:', parseError, '原始行:', line)
+            }
+          } else if (line.trim() !== '') {
+            console.log('收到非 data 行:', line)
+          }
+        }
+      }
+      
+      // 确保 loading 状态被清除
+      setLoading(false)
+      console.log('流式处理完成，最终答案长度:', fullAnswerBuffer.length)
     } catch (error) {
+      // 清理定时器
+      if (typingTimer) {
+        clearTimeout(typingTimer)
+        typingTimer = null
+      }
+      isTypingActive = false
+      setLoading(false)
       const errorMessage = {
         role: 'assistant',
-        content: `抱歉，查询失败：${error.response?.data?.detail || error.message}`,
+        content: `抱歉，查询失败：${error.message}`,
         timestamp: new Date(),
       }
-      setMessages(prev => [...prev, errorMessage])
-    } finally {
-      setLoading(false)
+      // 移除占位符消息，添加错误消息
+      setMessages(prev => prev.filter(msg => msg.id !== assistantMessageId).concat(errorMessage))
     }
   }
 
@@ -321,11 +489,19 @@ const ChatInterface = () => {
             {!isInitialized ? '请先选择用户和狗' : '开始你的对话吧！'}
           </div>
         ) : (
-          messages.map((message, index) => (
-            <MessageBubble key={index} message={message} />
-          ))
+          messages.map((message, index) => {
+            // 判断是否是最后一条助手消息且正在加载
+            const isLastAssistantMessage = message.role === 'assistant' && index === messages.length - 1
+            const isTyping = loading && isLastAssistantMessage
+            return (
+              <MessageBubble 
+                key={message.id || index} 
+                message={message} 
+                isTyping={isTyping}
+              />
+            )
+          })
         )}
-        {loading && <LoadingSpinner />}
         <div ref={messagesEndRef} />
       </div>
 

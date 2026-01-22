@@ -31,8 +31,10 @@ from ai_utils import (
     decide_memory_writing, extract_profile_info_with_ai
 )
 from memory_writing import (
-    apply_memory_writing_decision, add_session_memory, upsert_profile
+    apply_memory_writing_decision, add_session_memory, upsert_profile,
+    consolidate_memory_to_dog
 )
+from consciousness_flow import ConsciousnessFlow
 
 
 # ==================== 基础路由 ====================
@@ -170,17 +172,19 @@ def setup_routes(app):
     @app.post("/api/debug/chat")
     async def debug_chat(request: DebugChatRequest):
         """
-        调试用：跨 user/dog/relationship/conversation 四库召回上下文，然后生成流式回答，并把本轮写入 conversation 库
+        调试用：使用意识流架构生成回答
         
-        约定：
-        - user 库：user_id = request.user_id, assistant_id = request.assistant_id
-        - dog 库：user_id = request.dog_id, assistant_id = request.assistant_id
-        - relationship 库：user_id = request.user_id, assistant_id = request.dog_id
-        - conversation 库：基于 metadata 中 default_user_id/default_assistant_id 建索引
+        按照意识流架构：
+        - Step 0: 用户输入（仅当前消息+1-2轮上下文，禁止引入历史记忆）
+        - Step 1: Emotion Grounding（情绪感受）- 使用模型，不查Viking，不落库
+        - Step 2: Subjective Recall（主观回忆）- 使用模型，不查Viking，不落库
+        - Step 3: Memory Verification（Viking校验）- 不使用模型，查Viking，不落库
+        - Step 4: Response Synthesis（回复生成）- 使用模型，不查Viking，不落库
+        - Step 5: Memory Consolidation（记忆沉淀）- 可选使用模型，不查Viking，落库到dog库
         
         返回流式响应（SSE格式）
         """
-        logger.info("【调试聊天-流式】开始处理")
+        logger.info("【调试聊天-意识流】开始处理")
         logger.info(f"请求参数: user_id={request.user_id}, dog_id={request.dog_id}, conversation_id={request.conversation_id}")
         
         # 校验合法性
@@ -199,98 +203,53 @@ def setup_routes(app):
         async def generate_stream():
             full_answer = ""
             try:
-                # 1) 召回 user 画像/事件
-                user_mems, _ = search_viking_memories(
-                    query=request.query,
+                # 构建极短的会话上下文（1-2轮，禁止引入历史记忆）
+                # 这里暂时为空，实际可以从请求中获取
+                conversation_context = []
+                
+                # 初始化意识流处理器
+                flow = ConsciousnessFlow(
                     user_id=user_id,
+                    dog_id=dog_id,
+                    conversation_id=conversation_id,
                     assistant_id=assistant_id,
-                    limit=request.limit or 5,
-                    collection_key="user",
-                )
-                
-                # 2) 召回 dog 画像/事件
-                dog_mems, _ = search_viking_memories(
-                    query=request.query,
-                    user_id=dog_id,
-                    assistant_id=assistant_id,
-                    limit=request.limit or 5,
-                    collection_key="dog",
-                )
-                
-                # 3) 召回 relationship（用户-狗）
-                rel_mems, _ = search_viking_memories(
-                    query=request.query,
-                    user_id=user_id,
-                    assistant_id=dog_id,
-                    limit=request.limit or 5,
-                    collection_key="relationship",
-                )
-                
-                # 4) 召回 conversation（用户-狗 的历史对话）
-                conv_mems, _ = search_viking_memories(
-                    query=request.query,
-                    user_id=user_id,
-                    assistant_id=dog_id,
-                    limit=request.limit or 5,
-                    collection_key="conversation",
-                )
-                
-                # 5) 使用机器狗角色模板生成流式回答
-                logger.info("【调试聊天-流式】开始生成流式回答")
-                chunk_count = 0
-                stream_generator = generate_answer_with_dog_persona_stream(
-                    query=request.query,
-                    user_memories=user_mems,
-                    dog_memories=dog_mems,
-                    relationship_memories=rel_mems,
-                    conversation_memories=conv_mems,
                     model=request.model or "chatgpt"
                 )
                 
-                # 在 async 函数中迭代同步生成器，确保每个 chunk 立即发送
-                # 注意：OpenAI 的流式响应是同步的，但我们需要在 async 上下文中处理
-                for chunk in stream_generator:
-                    chunk_count += 1
-                    full_answer += chunk
-                    # 发送 SSE 格式的数据，确保立即发送
+                # 执行意识流处理（非流式版本，用于获取完整结果）
+                flow_result = flow.process(
+                    query=request.query,
+                    conversation_context=conversation_context
+                )
+                
+                # 获取生成的回复
+                full_answer = flow_result.get("response", "抱歉，我现在有些困惑。")
+                
+                # 流式返回回复（模拟流式效果）
+                # 注意：实际实现中，可以在response_synthesis中直接使用流式API
+                words = full_answer.split()
+                for i, word in enumerate(words):
+                    chunk = word + (" " if i < len(words) - 1 else "")
                     sse_data = json.dumps({'content': chunk, 'done': False}, ensure_ascii=False)
-                    logger.info(f"【调试聊天-流式】准备发送第 {chunk_count} 个chunk (长度: {len(chunk)}, 内容: {repr(chunk[:30])})")
-                    # 使用 \n\n 确保 SSE 事件立即发送
                     sse_message = f"data: {sse_data}\n\n"
                     yield sse_message
-                    # 让出控制权，确保数据立即刷新到客户端
-                    await asyncio.sleep(0)
-                    logger.debug(f"【调试聊天-流式】已发送第 {chunk_count} 个chunk")
+                    await asyncio.sleep(0.01)  # 模拟流式效果
                 
-                logger.info(f"【调试聊天-流式】流式回答生成完成，共 {chunk_count} 个chunk，总长度: {len(full_answer)}")
+                # Step 5: 记忆沉淀（如果应该写入）
+                consolidation_result = flow_result.get("consolidation_result", {})
+                if consolidation_result.get("should_write") and consolidation_result.get("memory_text"):
+                    try:
+                        consolidate_memory_to_dog(
+                            user_id=user_id,
+                            dog_id=dog_id,
+                            memory_text=consolidation_result.get("memory_text"),
+                            assistant_id=assistant_id
+                        )
+                        logger.info("【记忆沉淀】成功写入dog库")
+                    except Exception as e:
+                        logger.error(f"【记忆沉淀】写入失败: {str(e)}")
                 
-                # 6) 记忆写入决策：是否写入？写入到哪里？
-                memory_decision = decide_memory_writing(
-                    user_id=user_id,
-                    dog_id=dog_id,
-                    conversation_id=conversation_id,
-                    query=request.query,
-                    answer=full_answer,
-                    user_memories=user_mems,
-                    dog_memories=dog_mems,
-                    relationship_memories=rel_mems,
-                    conversation_memories=conv_mems,
-                    model=request.model or "chatgpt",
-                )
-                
-                # 7) 基于决策结果，将用户长期特征 / 关系里程碑 / 机器狗认知变化写入对应库
-                extra_write_results = apply_memory_writing_decision(
-                    decision=memory_decision or {},
-                    user_id=user_id,
-                    dog_id=dog_id,
-                    conversation_id=conversation_id,
-                    assistant_id=assistant_id,
-                    query=request.query,
-                    answer=full_answer,
-                )
-                
-                # 8) 写入本轮对话到 conversation（用 conversation_id + 时间戳，保证每轮都落库）
-                write_result = None
+                # 写入本轮对话到 conversation 库（作为事实来源）
                 try:
                     coll = get_collection_by_key("conversation")
                     session_id = f"{conversation_id}_{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
@@ -304,18 +263,14 @@ def setup_routes(app):
                         "conversation_id": conversation_id,
                         "time": int(datetime.now().timestamp() * 1000),
                     }
-                    # 将记忆写入决策的关键信息也写入 metadata，便于后续检索和调试
-                    if memory_decision:
-                        metadata["memory_decision"] = {
-                            "should_write": bool(memory_decision.get("should_write")),
-                            "has_emotion_change": bool(memory_decision.get("has_emotion_change")),
-                            "is_relationship_turning": bool(memory_decision.get("is_relationship_turning")),
-                            "is_duplicate": bool(memory_decision.get("is_duplicate")),
-                            "targets": memory_decision.get("targets") or [],
-                        }
-                        conv_summary = (memory_decision.get("memories") or {}).get("conversation")
-                        if conv_summary:
-                            metadata["conversation_summary_by_dog"] = str(conv_summary)
+                    # 记录意识流处理的关键信息
+                    metadata["consciousness_flow"] = {
+                        "emotion": flow_result.get("emotion_state", {}).get("emotion", "unknown"),
+                        "recall_confidence": flow_result.get("subjective_recall", {}).get("confidence", "unknown"),
+                        "verified_fragments_count": len(flow_result.get("verified_recall", {}).get("verified_fragments", [])),
+                        "decayed_fragments_count": len(flow_result.get("verified_recall", {}).get("decayed_fragments", [])),
+                        "consolidation_written": consolidation_result.get("should_write", False),
+                    }
                     
                     write_result = coll.add_session(
                         session_id=session_id,
@@ -328,9 +283,9 @@ def setup_routes(app):
                 
                 # 发送完成信号
                 yield f"data: {json.dumps({'content': '', 'done': True, 'full_answer': full_answer}, ensure_ascii=False)}\n\n"
-                logger.info("【调试聊天-流式】处理完成")
+                logger.info("【调试聊天-意识流】处理完成")
             except Exception as e:
-                logger.error(f"【调试聊天-流式】处理失败: {str(e)}")
+                logger.error(f"【调试聊天-意识流】处理失败: {str(e)}")
                 import traceback
                 logger.error(f"堆栈跟踪:\n{traceback.format_exc()}")
                 error_msg = json.dumps({'error': f"调试聊天失败: {str(e)}", 'done': True}, ensure_ascii=False)

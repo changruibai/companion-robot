@@ -1,5 +1,11 @@
 """
 记忆写入模块：根据决策结果实际写入记忆库
+
+按照意识流架构，记忆库职责：
+- user 库：存储跨狗稳定事实，不存主观评价
+- dog 库：唯一承载关系变化，仅存"被验证过的痕迹"
+- conversation 库：作为事实来源，仅用于回忆校验
+- relationship 库：不参与实时决策，可用于离线分析或可视化
 """
 import os
 import json
@@ -300,3 +306,91 @@ def upsert_profile(
     )
     logger.info(f"【画像更新】add_profile(is_upsert=True) 完成: {json.dumps(result, ensure_ascii=False, default=str)}")
     return result
+
+
+def consolidate_memory_to_dog(
+    user_id: str,
+    dog_id: str,
+    memory_text: str,
+    assistant_id: str = "assistant_001"
+) -> Optional[dict]:
+    """
+    将验证过的记忆沉淀到 dog 库
+    
+    按照意识流架构：
+    - dog 库是唯一承载关系变化的地方
+    - 仅存"被验证过的痕迹"
+    - 在 dog 库中，user_id=dog_id, assistant_id=assistant_id
+    
+    Args:
+        user_id: 用户ID（用于标识这是关于哪个用户的记忆）
+        dog_id: 机器狗ID（在dog库中作为user_id）
+        memory_text: 要写入的记忆文本
+        assistant_id: 助手ID
+    
+    Returns:
+        写入结果，如果失败则返回 None
+    """
+    if not memory_text or not str(memory_text).strip():
+        logger.warning("【记忆沉淀-dog】记忆文本为空，跳过写入")
+        return None
+    
+    try:
+        # 获取历史dog记忆（以user为key）
+        old_profile_text = None
+        try:
+            dog_mems, _ = search_viking_memories(
+                query=f"关于用户{user_id}的记忆",
+                user_id=dog_id,
+                assistant_id=assistant_id,
+                limit=5,
+                collection_key="dog",
+                extra_filter={"memory_type": ["profile_v1"]}
+            )
+            # 从搜索结果中提取历史画像
+            for mem in dog_mems:
+                if mem.get("memory_type") == "profile_v1" and mem.get("content"):
+                    old_profile_text = mem.get("content")
+                    logger.info(f"【记忆沉淀-dog】找到历史记忆: {old_profile_text[:100]}...")
+                    break
+        except Exception as e:
+            logger.warning(f"【记忆沉淀-dog】获取历史记忆失败（继续使用新记忆）: {str(e)}")
+        
+        # 合并历史记忆和新记忆
+        if old_profile_text:
+            try:
+                summarized_memory = summarize_profile_with_ai(
+                    old_profile=old_profile_text,
+                    new_profile=memory_text,
+                    model="chatgpt"
+                )
+                if summarized_memory:
+                    logger.info(f"【记忆沉淀-dog】AI总结完成: {summarized_memory[:100]}...")
+                    final_memory_text = summarized_memory
+                else:
+                    logger.warning("【记忆沉淀-dog】AI总结失败，使用新记忆")
+                    final_memory_text = f"{old_profile_text}\n{memory_text}"
+            except Exception as e:
+                logger.error(f"【记忆沉淀-dog】AI总结异常，合并文本: {str(e)}")
+                final_memory_text = f"{old_profile_text}\n{memory_text}"
+        else:
+            logger.info("【记忆沉淀-dog】无历史记忆，直接使用新记忆")
+            final_memory_text = memory_text
+        
+        # 写入dog库
+        coll_dog = get_collection_by_key("dog")
+        payload = {
+            "user_profile": final_memory_text,  # 在dog库中，user_profile存储的是关于用户的记忆
+        }
+        res_dog = coll_dog.add_profile(
+            profile_type=VIKINGDB_PROFILE_TYPE,
+            memory_info=payload,
+            user_id=dog_id,  # 在dog库中，user_id=dog_id
+            assistant_id=assistant_id,
+            is_upsert=True,
+        )
+        logger.info(f"【记忆沉淀-dog】成功: {json.dumps(res_dog, ensure_ascii=False, default=str)}")
+        return res_dog
+    except Exception as e:
+        logger.error(f"【记忆沉淀-dog】失败: {str(e)}")
+        return None

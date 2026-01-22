@@ -10,6 +10,13 @@ const ChatInterface = () => {
   const [selectedUserId, setSelectedUserId] = useState('')
   const [selectedDogId, setSelectedDogId] = useState('')
   
+  // 模型选择
+  const [selectedModel, setSelectedModel] = useState('deepseek')
+  const modelOptions = [
+    { id: 'chatgpt', name: 'ChatGPT', description: 'OpenAI GPT-4o-mini' },
+    { id: 'deepseek', name: 'DeepSeek', description: 'DeepSeek Chat' },
+  ]
+  
   // 会话管理
   const [conversations, setConversations] = useState([])
   const [selectedConversationId, setSelectedConversationId] = useState('')
@@ -183,7 +190,8 @@ const ChatInterface = () => {
         dog_id: selectedDogId,
         conversation_id: selectedConversationId,
         assistant_id: 'assistant_001',
-        limit: 5
+        limit: 5,
+        model: selectedModel
       })
 
       const assistantMessage = {
@@ -222,7 +230,7 @@ const ChatInterface = () => {
     <div className="flex flex-col h-[calc(100vh-200px)] glass-effect rounded-3xl shadow-2xl overflow-hidden">
       {/* 顶部选择区域 */}
       <div className="border-b border-gray-200 bg-gradient-to-r from-blue-50 to-purple-50 p-4">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-3">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-3">
           {/* 用户选择 */}
           <div>
             <label className="block text-xs font-semibold text-gray-600 mb-1">选择用户</label>
@@ -249,6 +257,22 @@ const ChatInterface = () => {
               <option value="">请选择狗</option>
               {dogs.map(dog => (
                 <option key={dog} value={dog}>{dog}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* 模型选择 */}
+          <div>
+            <label className="block text-xs font-semibold text-gray-600 mb-1">选择模型</label>
+            <select
+              value={selectedModel}
+              onChange={(e) => setSelectedModel(e.target.value)}
+              className="w-full px-3 py-2 rounded-xl border-2 border-gray-200 bg-white focus:border-blue-400 focus:outline-none transition-all text-sm"
+            >
+              {modelOptions.map(model => (
+                <option key={model.id} value={model.id}>
+                  {model.name}
+                </option>
               ))}
             </select>
           </div>
@@ -329,7 +353,7 @@ const ChatInterface = () => {
           </div>
         </form>
         <p className="text-xs text-gray-500 mt-2 text-center">
-          基于 VikingDB 记忆库 + OpenAI GPT 智能回答
+          基于 VikingDB 记忆库 + {modelOptions.find(m => m.id === selectedModel)?.description || 'AI'} 智能回答
         </p>
       </div>
     </div>

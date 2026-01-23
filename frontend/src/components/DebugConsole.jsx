@@ -30,12 +30,14 @@ const defaultState = {
 
 function Select({ label, value, options, onChange }) {
   return (
-    <label className="block">
-      <div className="text-xs font-semibold text-gray-600 mb-1">{label}</div>
+    <label className="form-control w-full">
+      <div className="label">
+        <span className="label-text text-xs font-semibold">{label}</span>
+      </div>
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="w-full px-3 py-2 rounded-xl border border-gray-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-300"
+        className="select select-bordered w-full"
       >
         {options.map((opt) => (
           <option key={opt} value={opt}>
@@ -55,7 +57,7 @@ function AddId({ placeholder, onAdd }) {
         value={val}
         onChange={(e) => setVal(e.target.value)}
         placeholder={placeholder}
-        className="flex-1 px-3 py-2 rounded-xl border border-gray-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-300"
+        className="input input-bordered flex-1"
       />
       <button
         onClick={() => {
@@ -64,7 +66,7 @@ function AddId({ placeholder, onAdd }) {
           onAdd(v)
           setVal('')
         }}
-        className="px-3 py-2 rounded-xl bg-gray-900 text-white text-sm hover:bg-black"
+        className="btn btn-primary btn-sm"
       >
         添加
       </button>
@@ -233,12 +235,14 @@ export default function DebugConsole() {
       {/* 左侧：实体选择 */}
       <div className="glass-effect rounded-3xl shadow-xl p-5 space-y-4">
         <div className="flex items-center justify-between">
-          <div className="text-lg font-bold text-gray-900">调试控制台</div>
-          <span className="text-xs text-gray-500">多用户 / 多狗 / 多对话</span>
+          <div className="text-lg font-bold">调试控制台</div>
+          <span className="text-xs text-base-content/60">多用户 / 多狗 / 多对话</span>
         </div>
 
-        <div className="text-xs text-gray-600 bg-white/60 rounded-2xl p-3 border border-gray-100">
-          当前选择：<span className="font-mono">{selectedSummary}</span>
+        <div className="alert alert-info py-2">
+          <span className="text-xs">
+            当前选择：<span className="font-mono">{selectedSummary}</span>
+          </span>
         </div>
 
         <div className="grid grid-cols-1 gap-3">
@@ -267,9 +271,9 @@ export default function DebugConsole() {
           <AddId placeholder="新增 conversation_id，例如 conv_20260121_1" onAdd={(v) => addEntity('conversations', v)} />
         </div>
 
-        <div className="rounded-2xl border border-gray-100 bg-white/60 p-3">
-          <div className="text-xs font-semibold text-gray-700 mb-2">后端 collection 绑定</div>
-          <pre className="text-[11px] leading-4 text-gray-700 whitespace-pre-wrap">
+        <div className="card bg-base-200 p-3">
+          <div className="text-xs font-semibold mb-2">后端 collection 绑定</div>
+          <pre className="text-[11px] leading-4 whitespace-pre-wrap">
             {collections ? JSON.stringify(collections, null, 2) : '加载中...'}
           </pre>
         </div>
@@ -277,88 +281,82 @@ export default function DebugConsole() {
 
       {/* 中间：写入画像/关系 */}
       <div className="glass-effect rounded-3xl shadow-xl p-5 space-y-4">
-        <div className="text-lg font-bold text-gray-900">写入记忆（真实落库）</div>
+        <div className="text-lg font-bold">写入记忆（真实落库）</div>
 
         <div className="space-y-2">
-          <div className="text-sm font-semibold text-gray-800">User 画像（写入 user 库）</div>
+          <div className="label">
+            <span className="label-text text-sm font-semibold">User 画像（写入 user 库）</span>
+          </div>
           <textarea
             value={profileText}
             onChange={(e) => setProfileText(e.target.value)}
             placeholder="例如：张三，喜欢咖啡，住在北京..."
-            className="w-full min-h-[90px] px-3 py-2 rounded-2xl border border-gray-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-300"
+            className="textarea textarea-bordered w-full min-h-[90px]"
           />
-          <button onClick={handleWriteUser} className="px-3 py-2 rounded-xl bg-blue-600 text-white text-sm hover:bg-blue-700">
+          <button onClick={handleWriteUser} className="btn btn-primary btn-sm">
             写入 user
           </button>
         </div>
 
         <div className="space-y-2">
-          <div className="text-sm font-semibold text-gray-800">Dog 画像（写入 dog 库）</div>
+          <div className="label">
+            <span className="label-text text-sm font-semibold">Dog 画像（写入 dog 库）</span>
+          </div>
           <textarea
             value={dogProfileText}
             onChange={(e) => setDogProfileText(e.target.value)}
             placeholder="例如：dog_001 是柴犬外形，名字旺财，喜欢追球..."
-            className="w-full min-h-[90px] px-3 py-2 rounded-2xl border border-gray-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-300"
+            className="textarea textarea-bordered w-full min-h-[90px]"
           />
-          <button onClick={handleWriteDog} className="px-3 py-2 rounded-xl bg-indigo-600 text-white text-sm hover:bg-indigo-700">
+          <button onClick={handleWriteDog} className="btn btn-secondary btn-sm">
             写入 dog
           </button>
         </div>
 
         <div className="space-y-2">
-          <div className="text-sm font-semibold text-gray-800">关系记忆（写入 relationship 库）</div>
+          <div className="label">
+            <span className="label-text text-sm font-semibold">关系记忆（写入 relationship 库）</span>
+          </div>
           <textarea
             value={relationshipText}
             onChange={(e) => setRelationshipText(e.target.value)}
             placeholder="例如：用户张三与旺财是主人与宠物关系，旺财怕洗澡..."
-            className="w-full min-h-[90px] px-3 py-2 rounded-2xl border border-gray-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-300"
+            className="textarea textarea-bordered w-full min-h-[90px]"
           />
           <button
             onClick={handleWriteRelationship}
-            className="px-3 py-2 rounded-xl bg-purple-600 text-white text-sm hover:bg-purple-700"
+            className="btn btn-accent btn-sm"
           >
             写入 relationship（user + dog）
           </button>
         </div>
 
         {status && (
-          <div
-            className={[
-              'rounded-2xl p-3 text-sm border',
-              status.type === 'ok' ? 'bg-green-50 border-green-200 text-green-800' : 'bg-red-50 border-red-200 text-red-800',
-            ].join(' ')}
-          >
-            {status.text}
+          <div className={`alert ${status.type === 'ok' ? 'alert-success' : 'alert-error'}`}>
+            <span>{status.text}</span>
           </div>
         )}
       </div>
 
       {/* 右侧：聊天 + 展示召回 */}
       <div className="glass-effect rounded-3xl shadow-xl p-5 flex flex-col">
-        <div className="text-lg font-bold text-gray-900 mb-3">对话调试（写入 conversation 库）</div>
+        <div className="text-lg font-bold mb-3">对话调试（写入 conversation 库）</div>
 
         <div className="flex-1 overflow-y-auto space-y-3 pr-1">
           {chatLog.length === 0 && (
-            <div className="text-sm text-gray-600 bg-white/60 rounded-2xl p-3 border border-gray-100">
-              在右下输入一句话，后端会跨四个库召回上下文并回答，同时把本轮写入 conversation。
+            <div className="alert alert-info">
+              <span className="text-sm">在右下输入一句话，后端会跨四个库召回上下文并回答，同时把本轮写入 conversation。</span>
             </div>
           )}
           {chatLog.map((m, idx) => (
-            <div key={idx} className={m.role === 'user' ? 'text-right' : 'text-left'}>
-              <div
-                className={[
-                  'inline-block max-w-[92%] rounded-2xl px-4 py-3 border',
-                  m.role === 'user'
-                    ? 'bg-blue-600 text-white border-blue-700'
-                    : 'bg-white/80 text-gray-900 border-gray-100',
-                ].join(' ')}
-              >
+            <div key={idx} className={`chat ${m.role === 'user' ? 'chat-end' : 'chat-start'}`}>
+              <div className={`chat-bubble ${m.role === 'user' ? 'chat-bubble-primary' : 'chat-bubble-secondary'}`}>
                 <div className="text-sm whitespace-pre-wrap">{m.content}</div>
               </div>
               {m.role === 'assistant' && m.context && (
-                <details className="mt-2 text-left">
-                  <summary className="cursor-pointer text-xs text-gray-600">查看召回上下文（user/dog/relationship/conversation）</summary>
-                  <pre className="mt-2 text-[11px] leading-4 text-gray-700 bg-white/70 border border-gray-100 rounded-2xl p-3 whitespace-pre-wrap">
+                <details className="mt-2">
+                  <summary className="cursor-pointer text-xs text-base-content/60">查看召回上下文（user/dog/relationship/conversation）</summary>
+                  <pre className="mt-2 text-[11px] leading-4 bg-base-200 border border-base-300 rounded-2xl p-3 whitespace-pre-wrap">
                     {JSON.stringify(m.context, null, 2)}
                   </pre>
                 </details>
@@ -367,7 +365,7 @@ export default function DebugConsole() {
           ))}
         </div>
 
-        <div className="mt-4 border-t border-gray-200 pt-4">
+        <div className="mt-4 border-t border-base-300 pt-4">
           <div className="flex gap-2">
             <input
               value={chatInput}
@@ -377,35 +375,30 @@ export default function DebugConsole() {
               onKeyDown={(e) => {
                 if (e.key === 'Enter') handleChat()
               }}
-              className="flex-1 px-4 py-3 rounded-2xl border border-gray-200 bg-white focus:outline-none focus:ring-2 focus:ring-blue-300 disabled:opacity-60"
+              className="input input-bordered flex-1"
             />
             <button
               onClick={handleChat}
               disabled={!canChat || loading || !chatInput.trim()}
-              className="px-4 py-3 rounded-2xl bg-gray-900 text-white text-sm hover:bg-black disabled:opacity-50"
+              className="btn btn-primary"
             >
               {loading ? '发送中...' : '发送'}
             </button>
           </div>
-          <div className="mt-2 text-xs text-gray-500">
+          <div className="mt-2 text-xs text-base-content/60">
             注意：conversation 库写入采用 <span className="font-mono">conversation_id + 时间戳</span>，保证每轮都落库。
           </div>
         </div>
       </div>
 
       {/* 全局 Toast */}
-      <div className="fixed bottom-6 right-6 space-y-2 z-50">
+      <div className="toast toast-end toast-bottom z-50">
         {toasts.map((t) => (
           <div
             key={t.id}
-            className={[
-              'px-4 py-3 rounded-2xl shadow-lg text-sm border bg-white',
-              t.type === 'ok'
-                ? 'border-green-200 text-green-800 bg-green-50'
-                : 'border-red-200 text-red-800 bg-red-50',
-            ].join(' ')}
+            className={`alert ${t.type === 'ok' ? 'alert-success' : 'alert-error'}`}
           >
-            {t.text}
+            <span>{t.text}</span>
           </div>
         ))}
       </div>

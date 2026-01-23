@@ -397,15 +397,15 @@ const ChatInterface = () => {
   return (
     <div className="flex flex-col h-[calc(100vh-200px)] glass-effect rounded-3xl shadow-2xl overflow-hidden">
       {/* 顶部选择区域 */}
-      <div className="border-b border-gray-200 bg-gradient-to-r from-blue-50 to-purple-50 p-4">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-3">
+      <div className="border-b border-base-300 bg-base-200/60 px-4 pt-4 pb-3">
+        <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-3 items-end">
           {/* 用户选择 */}
           <div>
-            <label className="block text-xs font-semibold text-gray-600 mb-1">选择用户</label>
+            <label className="label label-text text-xs font-semibold">选择用户</label>
             <select
               value={selectedUserId}
               onChange={(e) => handleUserChange(e.target.value)}
-              className="w-full px-3 py-2 rounded-xl border-2 border-gray-200 bg-white focus:border-blue-400 focus:outline-none transition-all text-sm"
+              className="select select-bordered w-full text-sm"
             >
               <option value="">请选择用户</option>
               {users.map(user => (
@@ -416,11 +416,11 @@ const ChatInterface = () => {
 
           {/* 狗选择 */}
           <div>
-            <label className="block text-xs font-semibold text-gray-600 mb-1">选择狗</label>
+            <label className="label label-text text-xs font-semibold">选择狗</label>
             <select
               value={selectedDogId}
               onChange={(e) => handleDogChange(e.target.value)}
-              className="w-full px-3 py-2 rounded-xl border-2 border-gray-200 bg-white focus:border-blue-400 focus:outline-none transition-all text-sm"
+              className="select select-bordered w-full text-sm"
             >
               <option value="">请选择狗</option>
               {dogs.map(dog => (
@@ -431,11 +431,11 @@ const ChatInterface = () => {
 
           {/* 模型选择 */}
           <div>
-            <label className="block text-xs font-semibold text-gray-600 mb-1">选择模型</label>
+            <label className="label label-text text-xs font-semibold">选择模型</label>
             <select
               value={selectedModel}
               onChange={(e) => setSelectedModel(e.target.value)}
-              className="w-full px-3 py-2 rounded-xl border-2 border-gray-200 bg-white focus:border-blue-400 focus:outline-none transition-all text-sm"
+              className="select select-bordered w-full text-sm"
             >
               {modelOptions.map(model => (
                 <option key={model.id} value={model.id}>
@@ -446,14 +446,14 @@ const ChatInterface = () => {
           </div>
 
           {/* 会话管理 */}
-          <div className="flex gap-2">
+          <div className="flex gap-2 items-center">
             <div className="flex-1">
-              <label className="block text-xs font-semibold text-gray-600 mb-1">选择会话</label>
+              <label className="label label-text text-xs font-semibold">选择会话</label>
               <select
                 value={selectedConversationId}
                 onChange={(e) => selectConversation(e.target.value)}
                 disabled={!isInitialized || isLoadingConversations}
-                className="w-full px-3 py-2 rounded-xl border-2 border-gray-200 bg-white focus:border-blue-400 focus:outline-none transition-all text-sm disabled:opacity-50"
+                className="select select-bordered w-full text-sm disabled:opacity-50"
               >
                 <option value="">请选择会话</option>
                 {conversations.map(conv => (
@@ -463,29 +463,33 @@ const ChatInterface = () => {
                 ))}
               </select>
             </div>
-            <div className="flex items-end">
+            
+          </div>
+          <div className="flex items-end">
               <button
                 onClick={startNewConversation}
                 disabled={!isInitialized}
-                className="px-4 py-2 rounded-xl bg-gradient-to-r from-blue-500 to-purple-600 text-white text-sm font-medium hover:shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+                className="btn btn-primary whitespace-nowrap h-[3rem]"
               >
                 新对话
               </button>
             </div>
-          </div>
         </div>
         
         {!isInitialized && (
-          <div className="text-xs text-amber-600 bg-amber-50 px-3 py-2 rounded-lg">
-            ⚠️ 请先选择用户和狗，然后才能开始对话
+          <div className="alert alert-warning py-2">
+            <svg xmlns="http://www.w3.org/2000/svg" className="stroke-current shrink-0 h-4 w-4" fill="none" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+            <span className="text-xs">请先选择用户和狗，然后才能开始对话</span>
           </div>
         )}
       </div>
 
       {/* 消息区域 */}
-      <div className="flex-1 overflow-y-auto p-6 space-y-4">
+      <div className="flex-1 overflow-y-auto p-6 space-y-4 bg-base-100">
         {messages.length === 0 ? (
-          <div className="flex items-center justify-center h-full text-gray-400">
+          <div className="flex items-center justify-center h-full text-base-content/50">
             {!isInitialized ? '请先选择用户和狗' : '开始你的对话吧！'}
           </div>
         ) : (
@@ -506,7 +510,7 @@ const ChatInterface = () => {
       </div>
 
       {/* 输入区域 */}
-      <div className="border-t border-gray-200 bg-gradient-to-r from-blue-50 to-purple-50 p-4">
+      <div className="border-t border-base-300 bg-base-200/50 p-4">
         <form onSubmit={handleSubmit} className="flex space-x-3">
           <div className="flex-1 relative">
             <input
@@ -514,13 +518,13 @@ const ChatInterface = () => {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               placeholder={isInitialized ? "输入你的问题..." : "请先选择用户和狗"}
-              className="w-full px-4 py-3 pr-12 rounded-2xl border-2 border-gray-200 focus:border-blue-400 focus:outline-none transition-all bg-white shadow-sm disabled:opacity-50"
+              className="input input-bordered w-full pr-12"
               disabled={loading || !isInitialized}
             />
             <button
               type="submit"
               disabled={loading || !input.trim() || !isInitialized || !selectedConversationId}
-              className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 bg-gradient-to-r from-blue-500 to-purple-600 rounded-xl flex items-center justify-center text-white hover:shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              className="absolute right-2 top-1/2 -translate-y-1/2 btn btn-primary btn-sm btn-circle"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
@@ -528,7 +532,7 @@ const ChatInterface = () => {
             </button>
           </div>
         </form>
-        <p className="text-xs text-gray-500 mt-2 text-center">
+        <p className="text-xs text-base-content/60 mt-2 text-center">
           基于 VikingDB 记忆库 + {modelOptions.find(m => m.id === selectedModel)?.description || 'AI'} 智能回答
         </p>
       </div>

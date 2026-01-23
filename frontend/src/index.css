@@ -3,25 +3,27 @@
 @tailwind utilities;
 
 @layer base {
-  body {
-    @apply bg-gradient-to-br from-blue-50 via-purple-50 to-pink-50 min-h-screen;
+  html, body {
+    @apply min-h-screen bg-base-200 text-base-content antialiased;
   }
 }
 
 @layer components {
   .glass-effect {
-    @apply bg-white/80 backdrop-blur-lg border border-white/20 shadow-xl;
+    @apply bg-base-100/80 backdrop-blur-lg border border-base-300 shadow-xl;
   }
   
   .gradient-text {
-    @apply bg-gradient-to-r from-blue-600 via-purple-600 to-pink-600 bg-clip-text text-transparent;
+    background: linear-gradient(to right, hsl(var(--p)), hsl(var(--s)), hsl(var(--a)));
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
   }
-  
-  .chat-bubble-user {
-    @apply bg-gradient-to-r from-blue-500 to-purple-500 text-white rounded-2xl rounded-tr-none px-4 py-3 shadow-lg;
-  }
-  
-  .chat-bubble-assistant {
-    @apply bg-white text-gray-800 rounded-2xl rounded-tl-none px-4 py-3 shadow-lg border border-gray-100;
+
+  /* 提升聊天气泡文本可读性 */
+  .chat-bubble-primary,
+  .chat-bubble-secondary {
+    @apply text-base-content text-sm leading-relaxed;
   }
 }

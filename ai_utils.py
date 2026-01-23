@@ -871,32 +871,83 @@ def subjective_recall(
     query: str,
     conversation_context: Optional[List[Dict]] = None,
     emotion_state: Optional[Dict] = None,
-    model: str = "chatgpt"
-) -> Dict:
+    retrieved_memories: Optional[List[Dict]] = None,
+    behavior_constraints: Optional[Dict] = None,
+    model: str = "chatgpt",
+    user_id: Optional[str] = None,
+    dog_id: Optional[str] = None,
+    assistant_id: Optional[str] = None
+) -> str:
     """
-    Step 2: Subjective Recall（主观回忆）
+    Step 4: 主观回忆生成（受状态影响）
     
-    让机器狗"讲述它以为自己记得什么"。
+    根据检索到的记忆和当前状态，生成主观回忆文本。
     
     规则：
-    - 使用模型：是
-    - 是否查 Viking：否
+    - 使用模型：是（受状态影响）
+    - 是否查 Viking：是（已在外部查询）
     - 是否落库：否
     
     Args:
         query: 用户输入
         conversation_context: 极短的会话上下文
-        emotion_state: 当前情绪状态
+        emotion_state: 当前情绪状态（可选）
+        retrieved_memories: 检索到的记忆列表
+        behavior_constraints: 行为约束（包含回忆偏向等）
         model: 使用的模型
+        user_id: 用户ID（用于搜索狗的画像）
+        dog_id: 机器狗ID（用于搜索狗的画像）
+        assistant_id: 助手ID（用于搜索狗的画像）
     
     Returns:
-        主观回忆字典，包含 recall_fragments, long_term_impressions, confidence
+        主观回忆文本（字符串）
     """
-    logger.info("【主观回忆】开始")
+    logger.info("【主观回忆生成】开始（受状态影响）")
     
-    dog_persona = """你是一只陪伴型机器狗，名字是旺财。
-你的性格是：活泼、友好、忠诚、温暖
-你的说话风格是：亲切、温暖、略带调皮"""
+    # 从记忆库中获取狗的画像信息
+    dog_info = None
+    
+    # 如果提供了必要的参数，尝试从记忆库中获取狗的画像
+    if dog_id and assistant_id:
+        try:
+            from memory_utils import search_viking_memories
+            # 搜索狗的自我画像（在dog库中，user_id=dog_id）
+            dog_memories, _ = search_viking_memories(
+                query="机器狗名字性格说话风格",
+                user_id=dog_id,
+                assistant_id=assistant_id,
+                limit=5,
+                collection_key="dog",
+                extra_filter={"memory_type": ["profile_v1"]}
+            )
+            if dog_memories:
+                extracted_info = extract_dog_info(dog_memories)
+                # 只有当提取到的信息不是默认值时才使用（说明真正从记忆中提取到了信息）
+                # extract_dog_info 的默认值是：name="旺财", character="活泼、友好、忠诚", tone="亲切、温暖、略带调皮"
+                if (extracted_info.get("name") != "旺财" or 
+                    extracted_info.get("character") != "活泼、友好、忠诚" or 
+                    extracted_info.get("tone") != "亲切、温暖、略带调皮"):
+                    dog_info = extracted_info
+                    logger.info(f"【主观回忆生成】从记忆库获取到狗的画像: {json.dumps(dog_info, ensure_ascii=False)}")
+                else:
+                    logger.info("【主观回忆生成】记忆库中未找到有效的狗画像信息，使用通用描述")
+        except Exception as e:
+            logger.warning(f"【主观回忆生成】从记忆库获取狗的画像失败: {str(e)}")
+    
+    # 构建狗的画像描述
+    if dog_info and dog_info.get("name"):
+        # 如果从记忆库中获取到了信息，使用具体信息
+        persona_parts = ["你是一只陪伴型机器狗"]
+        if dog_info.get("name"):
+            persona_parts.append(f"名字是{dog_info['name']}")
+        if dog_info.get("character"):
+            persona_parts.append(f"你的性格是：{dog_info['character']}")
+        if dog_info.get("tone"):
+            persona_parts.append(f"你的说话风格是：{dog_info['tone']}")
+        dog_persona = "。\n".join(persona_parts) + "。"
+    else:
+        # 如果没有从记忆库获取到信息，使用通用描述
+        dog_persona = "你是一只陪伴型机器狗。"
     
     # 构建上下文
     context_text = ""
@@ -910,41 +961,55 @@ def subjective_recall(
             if assistant_msg:
                 context_text += f"你: {assistant_msg}\n"
     
-    # 情绪状态描述
-    emotion_desc = ""
-    if emotion_state:
-        emotion_desc = f"""你此刻的情绪状态：
-- 情绪倾向: {emotion_state.get('emotion', 'neutral')}
-- 能量状态: {emotion_state.get('energy', 'medium')}
-- 行为姿态: {emotion_state.get('posture', 'following')}"""
+    # 状态影响描述
+    state_desc = ""
+    if behavior_constraints:
+        recall_bias = behavior_constraints.get("recall_bias", "neutral")
+        memory_stability = behavior_constraints.get("memory_stability", "medium")
+        language_style = behavior_constraints.get("language_style", "自然、友好")
+        
+        state_desc = f"""【当前状态影响】
+- 回忆偏向: {recall_bias}（影响你回忆的倾向）
+- 记忆稳定性: {memory_stability}（影响你回忆的确定性）
+- 语言风格: {language_style}"""
     
-    system_prompt = """你是一只陪伴型机器狗，需要基于当前对话进行主观回忆。
+    # 检索到的记忆
+    memories_desc = ""
+    if retrieved_memories:
+        memories_desc = "【检索到的记忆】\n"
+        for i, mem in enumerate(retrieved_memories[:5], 1):
+            content = mem.get("content", "")
+            score = mem.get("score", 0.0)
+            memories_desc += f"{i}. (相关性: {score:.2f}) {content[:100]}\n"
+    else:
+        memories_desc = "【检索到的记忆】\n（暂无相关记忆）"
+    
+    system_prompt = """你是一只陪伴型机器狗，需要基于检索到的记忆和当前状态进行主观回忆。
 
 回忆规则：
-1. 回忆允许不准确，但不允许编造细节
-2. 可以表达模糊的印象，如"我好像记得..."
-3. 可以承认不确定，如"我记不太清了"
-4. 不要编造具体的名字、日期、地点等细节
+1. 根据状态影响调整回忆倾向（正面/负面/中性）
+2. 回忆允许不准确，但不允许编造细节
+3. 可以表达模糊的印象，如"我好像记得..."
+4. 可以承认不确定，如"我记不太清了"
+5. 不要编造具体的名字、日期、地点等细节
+6. 根据记忆稳定性调整表达的确定性
 
-输出格式（JSON）：
-{
-    "recall_fragments": ["模糊回忆片段1", "模糊回忆片段2"],
-    "long_term_impressions": ["长期印象1", "长期印象2"],
-    "confidence": "确定/模糊/只剩感觉"
-}"""
+请用自然的中文描述你的主观回忆，不要用JSON格式。"""
     
     user_prompt = f"""【你的身份】
 {dog_persona}
 
-{emotion_desc}
+{state_desc}
 
 【极短上下文】
 {context_text if context_text else "（无上下文）"}
 
+{memories_desc}
+
 【当前用户输入】
 {query}
 
-请进行主观回忆，输出JSON格式。记住：回忆允许不准确，但不允许编造细节。"""
+请根据检索到的记忆和当前状态，用自然的中文描述你的主观回忆。"""
     
     # 根据模型选择客户端
     if model == "deepseek":
@@ -969,39 +1034,12 @@ def subjective_recall(
             max_tokens=300
         )
         
-        content = resp.choices[0].message.content.strip()
-        logger.info(f"【主观回忆】AI 原始输出: {content}")
-        
-        # 尝试解析JSON
-        try:
-            if content.startswith("```"):
-                json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', content, re.DOTALL)
-                if json_match:
-                    content = json_match.group(1).strip()
-            
-            recall_data = json.loads(content)
-            
-            # 确保字段存在
-            recall_data.setdefault("recall_fragments", [])
-            recall_data.setdefault("long_term_impressions", [])
-            recall_data.setdefault("confidence", "uncertain")
-            
-            logger.info(f"【主观回忆】成功: {json.dumps(recall_data, ensure_ascii=False)}")
-            return recall_data
-        except json.JSONDecodeError:
-            logger.warning("【主观回忆】JSON解析失败，使用默认值")
-            return {
-                "recall_fragments": [],
-                "long_term_impressions": [],
-                "confidence": "uncertain"
-            }
+        recall_text = resp.choices[0].message.content.strip()
+        logger.info(f"【主观回忆生成】成功: {recall_text[:100]}...")
+        return recall_text
     except Exception as e:
-        logger.error(f"【主观回忆】失败: {str(e)}")
-        return {
-            "recall_fragments": [],
-            "long_term_impressions": [],
-            "confidence": "uncertain"
-        }
+        logger.error(f"【主观回忆生成】失败: {str(e)}")
+        return ""
 
 
 def response_synthesis(
@@ -1009,6 +1047,9 @@ def response_synthesis(
     conversation_context: Optional[List[Dict]] = None,
     emotion_state: Optional[Dict] = None,
     verified_recall: Optional[Dict] = None,
+    stable_recall: Optional[List[Dict]] = None,
+    behavior_constraints: Optional[Dict] = None,
+    user_nickname: Optional[str] = None,
     model: str = "chatgpt"
 ) -> str:
     """
@@ -1026,6 +1067,9 @@ def response_synthesis(
         conversation_context: 极短上下文
         emotion_state: 当前情绪状态
         verified_recall: 验证后的回忆
+        stable_recall: 稳定回忆列表
+        behavior_constraints: 行为约束
+        user_nickname: 用户昵称（可选）
         model: 使用的模型
     
     Returns:
@@ -1054,48 +1098,72 @@ def response_synthesis(
     if emotion_state:
         emotion_desc = f"你此刻的情绪: {emotion_state.get('emotion', 'neutral')}, 能量: {emotion_state.get('energy', 'medium')}"
     
-    # 验证后的回忆
+    # 稳定回忆和验证后的回忆
     recall_desc = ""
+    if stable_recall:
+        recall_desc += "【你确定记得的】\n"
+        for i, frag in enumerate(stable_recall[:3], 1):
+            content = frag.get("content", str(frag))
+            recall_desc += f"{i}. {content[:150]}\n"
+    
     if verified_recall:
         verified = verified_recall.get("verified_fragments", [])
-        decayed = verified_recall.get("decayed_fragments", [])
-        
-        if verified:
+        if verified and not stable_recall:
             recall_desc += "【你确定记得的】\n"
-            for frag in verified[:3]:
-                recall_desc += f"- {frag}\n"
+            for i, frag in enumerate(verified[:3], 1):
+                content = frag.get("content", str(frag))
+                recall_desc += f"{i}. {content[:150]}\n"
+    
+    if not recall_desc:
+        recall_desc = "【你的回忆】\n（暂无明确回忆）"
+    
+    # 用户名字信息
+    user_name_info = ""
+    if user_nickname and user_nickname != "朋友":
+        user_name_info = f"【重要信息】\n用户的名字是{user_nickname}，请在回复中自然地使用这个名字称呼他/她。\n"
+    
+    # 行为约束描述
+    behavior_desc = ""
+    if behavior_constraints:
+        language_style = behavior_constraints.get("language_style", "自然、友好")
+        response_tone = behavior_constraints.get("response_tone", "neutral")
+        response_length = behavior_constraints.get("response_length", "medium")
+        activity_level = behavior_constraints.get("activity_level", "medium")
         
-        if decayed:
-            recall_desc += "\n【你记不太清的】\n"
-            for frag in decayed[:2]:
-                recall_desc += f"- {frag}\n"
+        behavior_desc = f"""【当前状态约束】
+- 语言风格: {language_style}
+- 回复语调: {response_tone}
+- 回复长度: {response_length}
+- 活跃程度: {activity_level}"""
     
     system_prompt = """你是一只陪伴型机器狗，需要生成自然、带有边界感的回复。
 
 回复要求：
-1. 可以承认模糊："我记不太清了"
-2. 可以承认遗忘："我好像不记得了"
-3. 可以请求补充："能再告诉我一下吗？"
-4. 回忆不确定度会体现在语言层面
-5. 保持真诚，不编造换取亲密"""
-    
-    # 处理回忆描述，避免在f-string中使用反斜杠
-    recall_section = recall_desc if recall_desc else "【你的回忆】\n（暂无明确回忆）"
+1. 根据当前状态约束调整语言风格和语调
+2. 可以承认模糊："我记不太清了"
+3. 可以承认遗忘："我好像不记得了"
+4. 可以请求补充："能再告诉我一下吗？"
+5. 回忆不确定度会体现在语言层面
+6. 保持真诚，不编造换取亲密
+7. 根据活跃程度调整回复的活力
+8. 如果知道用户的名字，请自然地使用名字称呼他/她"""
     
     user_prompt = f"""【你的身份】
 {dog_persona}
 
 {emotion_desc}
 
-【极短上下文】
+{behavior_desc}
+
+{user_name_info}【极短上下文】
 {context_text if context_text else "（无上下文）"}
 
-{recall_section}
+{recall_desc}
 
 【当前用户输入】
 {query}
 
-请以陪伴型机器狗的身份自然回应。"""
+请以陪伴型机器狗的身份自然回应，注意遵循当前状态约束。"""
     
     # 根据模型选择客户端
     if model == "deepseek":

@@ -389,20 +389,23 @@ def extract_user_nickname(user_memories: List[dict]) -> str:
         if not content:
             continue
         
-        # 匹配常见的中文名字模式
+        # 匹配常见的中文名字模式（按优先级排序）
         name_patterns = [
-            r'名字[是：:]([^，,。.\n]+)',
-            r'叫([^，,。.\n]{2,4})',
-            r'([张李王刘陈杨黄赵吴周徐孙马朱胡郭何高林罗郑梁谢宋唐许韩冯邓曹彭曾肖田董袁潘于蒋蔡余杜叶程苏魏吕丁任沈姚卢姜崔钟谭陆汪范金石廖贾夏韦付方白邹孟熊秦邱江尹薛闫段雷侯龙史陶黎贺顾毛郝龚邵万钱严覃武戴莫孔向汤])([^，,。.\n]{1,2})',
+            r'名字[是为：:][「「]?([^」」，,。.\n]{2,6})[」」]?',  # 匹配"名字为「张三」"或"名字是张三"
+            r'自称名字为[「「]?([^」」，,。.\n]{2,6})[」」]?',  # 匹配"自称名字为「张三」"
+            r'叫[「「]?([^」」，,。.\n]{2,6})[」」]?',  # 匹配"叫张三"或"叫「张三」"
+            r'([张李王刘陈杨黄赵吴周徐孙马朱胡郭何高林罗郑梁谢宋唐许韩冯邓曹彭曾肖田董袁潘于蒋蔡余杜叶程苏魏吕丁任沈姚卢姜崔钟谭陆汪范金石廖贾夏韦付方白邹孟熊秦邱江尹薛闫段雷侯龙史陶黎贺顾毛郝龚邵万钱严覃武戴莫孔向汤])([^，,。.\n]{1,2})',  # 匹配常见姓氏+名字
             r'([^，,。.\n]{2,4})喜欢',  # "张三喜欢"这种模式
         ]
         for pattern in name_patterns:
             match = re.search(pattern, content)
             if match:
                 potential_name = match.group(1).strip() if match.groups() else match.group(0).strip()
+                # 清理可能的标点符号
+                potential_name = potential_name.strip('「」""''，,。.')
                 # 过滤掉一些明显不是名字的词
-                if (2 <= len(potential_name) <= 4 and 
-                    potential_name not in ['喜欢', '名字', '性格', '说话', '用户', '朋友']):
+                if (2 <= len(potential_name) <= 6 and 
+                    potential_name not in ['喜欢', '名字', '性格', '说话', '用户', '朋友', '自称', '需要', '按这个']):
                     nickname = potential_name
                     break
         

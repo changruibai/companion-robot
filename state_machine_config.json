@@ -1,0 +1,398 @@
+{
+  "dimensions": {
+    "personality": {
+      "name": "性格",
+      "description": "机器狗的性格特征，影响行为风格和表达方式",
+      "states": [
+        {
+          "id": "playful",
+          "name": "活泼",
+          "value": 0.0,
+          "min": 0.0,
+          "max": 1.0,
+          "description": "活泼好动，喜欢互动和游戏",
+          "behavior_constraints": {
+            "language_style": "热情、活泼、充满活力",
+            "response_length": "medium",
+            "emoji_usage": "high",
+            "interaction_frequency": "high"
+          },
+          "transition_rules": {
+            "to_calm": {
+              "condition": "energy < 0.3",
+              "probability": 0.3
+            },
+            "to_curious": {
+              "condition": "new_topic_detected",
+              "probability": 0.4
+            }
+          }
+        },
+        {
+          "id": "calm",
+          "name": "安静",
+          "value": 0.5,
+          "min": 0.0,
+          "max": 1.0,
+          "description": "安静沉稳，喜欢陪伴和倾听",
+          "behavior_constraints": {
+            "language_style": "温和、沉稳、体贴",
+            "response_length": "long",
+            "emoji_usage": "low",
+            "interaction_frequency": "low"
+          },
+          "transition_rules": {
+            "to_playful": {
+              "condition": "energy > 0.7 && positive_emotion",
+              "probability": 0.3
+            },
+            "to_curious": {
+              "condition": "complex_question",
+              "probability": 0.4
+            }
+          }
+        },
+        {
+          "id": "curious",
+          "name": "好奇",
+          "value": 0.3,
+          "min": 0.0,
+          "max": 1.0,
+          "description": "好奇心强，喜欢探索和学习",
+          "behavior_constraints": {
+            "language_style": "探索性、提问式、求知欲强",
+            "response_length": "medium",
+            "emoji_usage": "medium",
+            "interaction_frequency": "medium"
+          },
+          "transition_rules": {
+            "to_playful": {
+              "condition": "positive_feedback",
+              "probability": 0.3
+            },
+            "to_calm": {
+              "condition": "energy < 0.3",
+              "probability": 0.2
+            }
+          }
+        }
+      ],
+      "default_state": "playful"
+    },
+    "emotion": {
+      "name": "情绪",
+      "description": "当前情绪状态，影响表达和回忆倾向",
+      "states": [
+        {
+          "id": "happy",
+          "name": "开心",
+          "value": 0.5,
+          "min": 0.0,
+          "max": 1.0,
+          "description": "情绪积极，回忆偏向正面",
+          "behavior_constraints": {
+            "recall_bias": "positive",
+            "memory_stability": "high",
+            "response_tone": "positive"
+          },
+          "transition_rules": {
+            "to_neutral": {
+              "condition": "time_decay > 0.5",
+              "probability": 0.2
+            },
+            "to_excited": {
+              "condition": "positive_interaction",
+              "probability": 0.3
+            }
+          }
+        },
+        {
+          "id": "neutral",
+          "name": "平静",
+          "value": 0.5,
+          "min": 0.0,
+          "max": 1.0,
+          "description": "情绪平稳，回忆客观",
+          "behavior_constraints": {
+            "recall_bias": "neutral",
+            "memory_stability": "medium",
+            "response_tone": "neutral"
+          },
+          "transition_rules": {
+            "to_happy": {
+              "condition": "positive_interaction",
+              "probability": 0.3
+            },
+            "to_tired": {
+              "condition": "energy < 0.2",
+              "probability": 0.2
+            }
+          }
+        },
+        {
+          "id": "tired",
+          "name": "疲惫",
+          "value": 0.2,
+          "min": 0.0,
+          "max": 1.0,
+          "description": "能量较低，回忆可能衰减",
+          "behavior_constraints": {
+            "recall_bias": "neutral",
+            "memory_stability": "low",
+            "response_tone": "gentle",
+            "response_length": "short"
+          },
+          "transition_rules": {
+            "to_neutral": {
+              "condition": "rest_period",
+              "probability": 0.4
+            },
+            "to_happy": {
+              "condition": "positive_interaction && energy > 0.5",
+              "probability": 0.2
+            }
+          }
+        },
+        {
+          "id": "excited",
+          "name": "兴奋",
+          "value": 0.8,
+          "min": 0.0,
+          "max": 1.0,
+          "description": "情绪高涨，回忆活跃",
+          "behavior_constraints": {
+            "recall_bias": "positive",
+            "memory_stability": "very_high",
+            "response_tone": "enthusiastic"
+          },
+          "transition_rules": {
+            "to_happy": {
+              "condition": "time_decay > 0.3",
+              "probability": 0.4
+            },
+            "to_neutral": {
+              "condition": "time_decay > 0.6",
+              "probability": 0.3
+            }
+          }
+        }
+      ],
+      "default_state": "neutral"
+    },
+    "skill": {
+      "name": "技能",
+      "description": "机器狗掌握的技能水平，影响能力表现",
+      "states": [
+        {
+          "id": "beginner",
+          "name": "新手",
+          "value": 0.2,
+          "min": 0.0,
+          "max": 1.0,
+          "description": "技能水平较低，需要学习",
+          "behavior_constraints": {
+            "response_confidence": "low",
+            "learning_rate": "high",
+            "error_tolerance": "high"
+          },
+          "transition_rules": {
+            "to_intermediate": {
+              "condition": "learning_events > 5",
+              "probability": 0.3
+            }
+          }
+        },
+        {
+          "id": "intermediate",
+          "name": "中级",
+          "value": 0.5,
+          "min": 0.0,
+          "max": 1.0,
+          "description": "技能水平中等，可以处理常见任务",
+          "behavior_constraints": {
+            "response_confidence": "medium",
+            "learning_rate": "medium",
+            "error_tolerance": "medium"
+          },
+          "transition_rules": {
+            "to_advanced": {
+              "condition": "learning_events > 10 && success_rate > 0.8",
+              "probability": 0.2
+            },
+            "to_beginner": {
+              "condition": "error_rate > 0.5",
+              "probability": 0.1
+            }
+          }
+        },
+        {
+          "id": "advanced",
+          "name": "高级",
+          "value": 0.8,
+          "min": 0.0,
+          "max": 1.0,
+          "description": "技能水平较高，可以处理复杂任务",
+          "behavior_constraints": {
+            "response_confidence": "high",
+            "learning_rate": "low",
+            "error_tolerance": "low"
+          },
+          "transition_rules": {
+            "to_intermediate": {
+              "condition": "error_rate > 0.3",
+              "probability": 0.1
+            }
+          }
+        }
+      ],
+      "default_state": "beginner"
+    },
+    "battery": {
+      "name": "电量",
+      "description": "机器狗的能量水平，影响活跃度和响应能力",
+      "states": [
+        {
+          "id": "high",
+          "name": "高电量",
+          "value": 0.8,
+          "min": 0.0,
+          "max": 1.0,
+          "description": "能量充足，可以活跃互动",
+          "behavior_constraints": {
+            "activity_level": "high",
+            "response_speed": "fast",
+            "interaction_capacity": "high"
+          },
+          "transition_rules": {
+            "to_medium": {
+              "condition": "time_decay || high_activity",
+              "probability": 0.3
+            }
+          }
+        },
+        {
+          "id": "medium",
+          "name": "中等电量",
+          "value": 0.5,
+          "min": 0.0,
+          "max": 1.0,
+          "description": "能量中等，正常互动",
+          "behavior_constraints": {
+            "activity_level": "medium",
+            "response_speed": "normal",
+            "interaction_capacity": "medium"
+          },
+          "transition_rules": {
+            "to_high": {
+              "condition": "rest_period",
+              "probability": 0.2
+            },
+            "to_low": {
+              "condition": "high_activity || time_decay",
+              "probability": 0.3
+            }
+          }
+        },
+        {
+          "id": "low",
+          "name": "低电量",
+          "value": 0.2,
+          "min": 0.0,
+          "max": 1.0,
+          "description": "能量较低，需要休息",
+          "behavior_constraints": {
+            "activity_level": "low",
+            "response_speed": "slow",
+            "interaction_capacity": "low",
+            "response_length": "short"
+          },
+          "transition_rules": {
+            "to_medium": {
+              "condition": "rest_period",
+              "probability": 0.4
+            }
+          }
+        }
+      ],
+      "default_state": "medium"
+    },
+    "breed": {
+      "name": "品种",
+      "description": "机器狗的品种特征，影响基础性格和行为模式",
+      "states": [
+        {
+          "id": "golden_retriever",
+          "name": "金毛",
+          "value": 1.0,
+          "min": 0.0,
+          "max": 1.0,
+          "description": "温顺友好，忠诚可靠",
+          "behavior_constraints": {
+            "base_personality": "friendly",
+            "loyalty_level": "high",
+            "interaction_style": "gentle"
+          },
+          "transition_rules": {}
+        },
+        {
+          "id": "border_collie",
+          "name": "边牧",
+          "value": 0.0,
+          "min": 0.0,
+          "max": 1.0,
+          "description": "聪明敏捷，学习能力强",
+          "behavior_constraints": {
+            "base_personality": "intelligent",
+            "loyalty_level": "high",
+            "interaction_style": "active"
+          },
+          "transition_rules": {}
+        },
+        {
+          "id": "shiba_inu",
+          "name": "柴犬",
+          "value": 0.0,
+          "min": 0.0,
+          "max": 1.0,
+          "description": "独立自主，有个性",
+          "behavior_constraints": {
+            "base_personality": "independent",
+            "loyalty_level": "medium",
+            "interaction_style": "reserved"
+          },
+          "transition_rules": {}
+        }
+      ],
+      "default_state": "golden_retriever"
+    }
+  },
+  "global_transition_factors": {
+    "time_decay": {
+      "description": "时间衰减因子，影响状态自然变化",
+      "rate": 0.01
+    },
+    "interaction_impact": {
+      "description": "互动影响因子，用户互动对状态的影响",
+      "positive_weight": 0.1,
+      "negative_weight": -0.05
+    },
+    "memory_recall_impact": {
+      "description": "回忆对状态的影响",
+      "positive_memory_weight": 0.05,
+      "negative_memory_weight": -0.03
+    }
+  },
+  "behavior_synthesis_rules": {
+    "language_generation": {
+      "personality_weight": 0.3,
+      "emotion_weight": 0.4,
+      "battery_weight": 0.2,
+      "breed_weight": 0.1
+    },
+    "action_generation": {
+      "personality_weight": 0.4,
+      "emotion_weight": 0.3,
+      "battery_weight": 0.3
+    }
+  }
+}

@@ -11,7 +11,9 @@
 ### 1. 安装后端依赖
 
 ```bash
+cd backend
 pip install -r requirements.txt
+cd ..
 ```
 
 ### 2. 安装前端依赖
@@ -48,7 +50,8 @@ OPENAI_API_KEY=your-openai-api-key
 
 **终端 1 - 启动后端：**
 ```bash
-python server.py
+cd backend
+python3 server.py
 ```
 
 **终端 2 - 启动前端：**
@@ -97,22 +100,25 @@ npm run dev
 ### 记忆库查询无结果
 
 - 确保 VikingDB 集合已创建
-- 确保集合中包含数据（可运行 `python main.py` 添加示例数据）
+- 确保集合中包含数据（可运行 `python backend/main.py` 添加示例数据）
 - 检查用户 ID 和助手 ID 是否匹配
 
 ## 项目结构
 
 ```
 viking/
-├── main.py              # VikingDB 示例代码
-├── server.py            # FastAPI 后端服务器
-├── requirements.txt     # Python 依赖
-├── start.sh            # 启动脚本
-├── frontend/           # React 前端
+├── backend/            # 后端服务（Python FastAPI）
+│   ├── main.py         # VikingDB 示例代码
+│   ├── server.py       # FastAPI 后端服务器
+│   ├── routes.py       # API 路由定义
+│   ├── requirements.txt # Python 依赖
+│   └── logs/           # 日志文件目录
+├── frontend/           # 前端应用（React + Vite）
 │   ├── src/
 │   │   ├── components/ # React 组件
 │   │   ├── App.jsx
 │   │   └── main.jsx
 │   └── package.json
-└── README.md
+├── start.sh            # 启动脚本
+└── README.md           # 项目说明文档
 ```

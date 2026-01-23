@@ -34,8 +34,10 @@ fi
 
 # 启动后端服务器（后台运行）
 echo "📦 启动后端服务器..."
+cd backend
 python3 server.py &
 BACKEND_PID=$!
+cd ..
 
 # 等待后端启动
 sleep 2
@@ -56,6 +58,12 @@ cd frontend
 if [ ! -d "node_modules" ]; then
     echo "📥 安装前端依赖..."
     npm install
+fi
+
+# 检查后端依赖是否已安装
+if [ ! -d "../backend" ]; then
+    echo "❌ backend 目录不存在"
+    exit 1
 fi
 
 echo "✅ 前端服务器启动中..."
